@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from database.crud import get_user_items, update_item_url, delete_item
+from database.errors import DatabaseError
 
 router = Router()
 
@@ -14,7 +15,12 @@ class LinkForm(StatesGroup):
 @router.message(Command("my_items"))
 @router.message(F.text.lower() == "мои вещи")
 async def show_my_items(message: Message):
-    items = await get_user_items(message.from_user.id)
+    try:
+        items = await get_user_items(message.from_user.id)
+    except DatabaseError:
+        await message.answer("Сейчас есть техническая проблема, попробуйте позже.")
+        return
+        
     if not items:
         await message.answer("У вас пока нет сохраненных вещей. Добавьте новую через /add !")
         return
@@ -58,20 +64,26 @@ async def process_url_input(message: Message, state: FSMContext):
         await message.answer("Кажется, это не ссылка на Авито. Попробуйте еще раз или нажмите /cancel.")
         return
         
-    success = await update_item_url(item_id, message.from_user.id, url)
-    if success:
-        await message.answer("Отлично! Ссылка сохранена, вещь теперь в статусе 'Продается'. Я начну собирать по ней статистику раз в неделю.")
-    else:
-        await message.answer("Произошла ошибка при сохранении ссылки.")
+    try:
+        success = await update_item_url(item_id, message.from_user.id, url)
+        if success:
+            await message.answer("Отлично! Ссылка сохранена, вещь теперь в статусе 'Продается'. Я начну собирать по ней статистику раз в неделю.")
+        else:
+            await message.answer("Произошла ошибка при сохранении ссылки.")
+    except DatabaseError:
+        await message.answer("Сейчас есть техническая проблема, попробуйте позже.")
         
     await state.clear()
 
 @router.callback_query(F.data.startswith("delete_item_"))
 async def process_delete_item_callback(callback: CallbackQuery):
     item_id = int(callback.data.split("_")[2])
-    success = await delete_item(item_id, callback.from_user.id)
-    if success:
-        await callback.message.delete()
-        await callback.answer("Вещь успешно удалена!", show_alert=True)
-    else:
-        await callback.answer("Не удалось удалить вещь.", show_alert=True)
+    try:
+        success = await delete_item(item_id, callback.from_user.id)
+        if success:
+            await callback.message.delete()
+            await callback.answer("Вещь успешно удалена!", show_alert=True)
+        else:
+            await callback.answer("Не удалось удалить вещь.", show_alert=True)
+    except DatabaseError:
+        await callback.answer("Сейчас есть техническая проблема, попробуйте позже.", show_alert=True)

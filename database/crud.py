@@ -4,6 +4,7 @@ from sqlalchemy import update, delete
 from sqlalchemy.exc import SQLAlchemyError
 from database.database import async_session
 from database.models import User, Item
+from database.errors import DatabaseError
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -20,7 +21,7 @@ async def _get_or_create_user(telegram_id: int):
             return user
     except SQLAlchemyError as e:
         logger.error(f"DB Error getting/creating user {telegram_id}: {e}")
-        raise
+        raise DatabaseError(f"Failed to get or create user: {e}")
 
 async def save_item(telegram_id: int, category: str, title: str, description: str, price: int):
     await _get_or_create_user(telegram_id)
@@ -39,7 +40,7 @@ async def save_item(telegram_id: int, category: str, title: str, description: st
             return new_item
     except SQLAlchemyError as e:
         logger.error(f"DB Error saving item for user {telegram_id}: {e}")
-        raise
+        raise DatabaseError(f"Failed to save item: {e}")
 
 async def get_user_items(telegram_id: int):
     try:
@@ -48,7 +49,7 @@ async def get_user_items(telegram_id: int):
             return result.scalars().all()
     except SQLAlchemyError as e:
         logger.error(f"DB Error getting user items for {telegram_id}: {e}")
-        return []
+        raise DatabaseError(f"Failed to retrieve user items: {e}")
 
 async def update_item_url(item_id: int, user_id: int, url: str):
     try:
@@ -59,7 +60,7 @@ async def update_item_url(item_id: int, user_id: int, url: str):
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error updating item {item_id}: {e}")
-        return False
+        raise DatabaseError(f"Failed to update item URL: {e}")
 
 async def get_item_by_id(item_id: int, user_id: int):
     try:
@@ -68,7 +69,7 @@ async def get_item_by_id(item_id: int, user_id: int):
             return result.scalars().first()
     except SQLAlchemyError as e:
         logger.error(f"DB Error getting item {item_id}: {e}")
-        return None
+        raise DatabaseError(f"Failed to retrieve item details: {e}")
 
 async def delete_item(item_id: int, user_id: int):
     try:
@@ -79,4 +80,4 @@ async def delete_item(item_id: int, user_id: int):
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error deleting item {item_id}: {e}")
-        return False
+        raise DatabaseError(f"Failed to delete item: {e}")

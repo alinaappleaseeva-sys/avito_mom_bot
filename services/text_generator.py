@@ -3,7 +3,8 @@ from utils.texts import CATEGORIES, CONDITIONS
 
 async def generate_sales_text(category: ItemCategory, condition: ItemCondition, size: str, brand: str, defects: str) -> str:
     """
-    Генерирует продающий текст для объявления на основе эвристик.
+    MOCK-СЕРВИС: Временный генератор текста продаж на основе эвристик. 
+    (В будущем здесь будет вызов LLM, например GPT/Gemini)
     """
     ru_category = CATEGORIES.get(category.value, "Вещь")
     title = f"{ru_category} {brand if brand.lower() != 'не знаю' else ''}".strip()

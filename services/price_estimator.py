@@ -3,15 +3,20 @@ from utils.constants import ItemCategory, ItemCondition, SellSpeed
 
 async def estimate_price_and_time(category: ItemCategory, condition: ItemCondition, defect_status: str, speed: SellSpeed) -> tuple[int, str]:
     """
-    Мок-функция для оценки стоимости и срока продажи вещи.
+    MOCK-СЕРВИС: Временная логика оценки стоимости и срока продажи вещи.
+    (В финальной версии здесь должен быть вызов AI или API аналитики Авито)
     Возвращает: (рекомендуемая цена, ожидаемый срок продажи)
     """
+    # Используем детерминированный генератор случайных чисел для стабильности MVP сессии
+    seed_string = f"{category.value}_{condition.value}_{defect_status.lower().strip()}_{speed.value}"
+    rng = random.Random(seed_string)
+
     base_prices = {
-        ItemCategory.STROLLER: random.randint(5000, 20000),
-        ItemCategory.CLOTHES: random.randint(500, 3000),
-        ItemCategory.SHOES: random.randint(800, 2500),
-        ItemCategory.TOYS: random.randint(300, 4000),
-        ItemCategory.OTHER: random.randint(500, 2000)
+        ItemCategory.STROLLER: rng.randint(5000, 20000),
+        ItemCategory.CLOTHES: rng.randint(500, 3000),
+        ItemCategory.SHOES: rng.randint(800, 2500),
+        ItemCategory.TOYS: rng.randint(300, 4000),
+        ItemCategory.OTHER: rng.randint(500, 2000)
     }
 
     price = base_prices.get(category, 1000)

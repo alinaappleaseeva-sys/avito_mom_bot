@@ -2,7 +2,8 @@ from utils.constants import ItemCategory
 
 async def generate_photo_checklist(category: ItemCategory, defects: str) -> str:
     """
-    Генерирует чеклист для фото в зависимости от категории и наличия дефектов.
+    MOCK-СЕРВИС: Захардкоженные подсказки под ограниченный набор категорий.
+    (В финальной версии здесь должна быть динамическая генерация)
     """
     checklist = [
         "1️⃣ Общий план вещи при хорошем дневном свете."
