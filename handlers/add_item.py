@@ -4,7 +4,8 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN
+from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN, CATEGORIES_REVERSE, CONDITIONS_REVERSE, SPEEDS_REVERSE
+from utils.constants import ItemCategory, ItemCondition, SellSpeed
 from services.price_estimator import estimate_price_and_time
 from services.text_generator import generate_sales_text
 from services.photo_checklist import generate_photo_checklist
@@ -128,16 +129,20 @@ async def process_speed(message: Message, state: FSMContext):
     # Сбор всех данных
     data = await state.get_data()
     
+    category_val = ItemCategory(CATEGORIES_REVERSE.get(data["category"], "other"))
+    condition_val = ItemCondition(CONDITIONS_REVERSE.get(data["condition"], "fair"))
+    speed_val = SellSpeed(SPEEDS_REVERSE.get(data["speed"], "optimal"))
+
     # 2. Обработка через сервисы-моки
     price, time_to_sell = await estimate_price_and_time(
-        data["category"], data["condition"], data["defects"], data["speed"]
+        category_val, condition_val, data["defects"], speed_val
     )
     
     text = await generate_sales_text(
-        data["category"], data["condition"], data["size"], data["brand"], data["defects"]
+        category_val, condition_val, data["size"], data["brand"], data["defects"]
     )
     
-    checklist = await generate_photo_checklist(data["category"], data["defects"])
+    checklist = await generate_photo_checklist(category_val, data["defects"])
     
     # Сохраняем в базу данных (Шаг 4)
     item = await save_item(

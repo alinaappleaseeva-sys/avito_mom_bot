@@ -40,6 +40,7 @@ CATEGORIES = {
     "toys": "Игрушки",
     "other": "Другое"
 }
+CATEGORIES_REVERSE = {v: k for k, v in CATEGORIES.items()}
 
 CONDITIONS = {
     "new": "Новая (с биркой)",
@@ -47,8 +48,10 @@ CONDITIONS = {
     "good": "Хорошее (есть следы носки)",
     "fair": "Б/у (полностью функциональна)"
 }
+CONDITIONS_REVERSE = {v: k for k, v in CONDITIONS.items()}
 
 SPEEDS = {
     "fast": "Как можно быстрее",
     "optimal": "Не тороплюсь (максимальная выгода)"
 }
+SPEEDS_REVERSE = {v: k for k, v in SPEEDS.items()}
