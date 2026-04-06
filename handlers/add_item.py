@@ -4,11 +4,16 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN
+from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN, CATEGORIES_REVERSE, CONDITIONS_REVERSE, SPEEDS_REVERSE
+from utils.constants import ItemCategory, ItemCondition, SellSpeed
 from services.price_estimator import estimate_price_and_time
 from services.text_generator import generate_sales_text
 from services.photo_checklist import generate_photo_checklist
 from database.crud import save_item
+from database.errors import DatabaseError
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 router = Router()
 
@@ -53,11 +58,13 @@ async def start_add_item(message: Message, state: FSMContext):
 
 @router.message(ItemForm.category)
 async def process_category(message: Message, state: FSMContext):
-    category = message.text
-    if category not in CATEGORIES.values():
-         category = "Другое" # Fallback, если ввели текстом что-то другое
+    category_ru = message.text
+    if category_ru not in CATEGORIES_REVERSE:
+         logger.warning(f"User {message.from_user.id} chose invalid category: {category_ru}")
+         await message.answer("Пожалуйста, выберите вариант из клавиатуры.")
+         return
     
-    await state.update_data(category=category)
+    await state.update_data(category=CATEGORIES_REVERSE[category_ru])
     await state.set_state(ItemForm.condition)
     await message.answer(
         MESSAGES["ask_condition"],
@@ -66,7 +73,13 @@ async def process_category(message: Message, state: FSMContext):
 
 @router.message(ItemForm.condition)
 async def process_condition(message: Message, state: FSMContext):
-    await state.update_data(condition=message.text)
+    condition_ru = message.text
+    if condition_ru not in CONDITIONS_REVERSE:
+         logger.warning(f"User {message.from_user.id} chose invalid condition: {condition_ru}")
+         await message.answer("Пожалуйста, выберите вариант из клавиатуры.")
+         return
+         
+    await state.update_data(condition=CONDITIONS_REVERSE[condition_ru])
     await state.set_state(ItemForm.size)
     await message.answer(
         MESSAGES["ask_size"],
@@ -117,10 +130,14 @@ async def process_defects_text(message: Message, state: FSMContext):
 
 @router.message(ItemForm.speed)
 async def process_speed(message: Message, state: FSMContext):
-    speed = message.text
-    if speed not in SPEEDS.values():
-        speed = "Оптимально"
-    await state.update_data(speed=speed)
+    speed_ru = message.text
+    if speed_ru not in SPEEDS_REVERSE:
+        logger.warning(f"User {message.from_user.id} chose invalid speed: {speed_ru}")
+        await message.answer("Пожалуйста, выберите вариант из клавиатуры.")
+        return
+        
+    speed_eng = SPEEDS_REVERSE[speed_ru]
+    await state.update_data(speed=speed_eng)
     
     # 1. Показываем статус загрузки
     msg = await message.answer(MESSAGES["generating"], reply_markup=ReplyKeyboardRemove())
@@ -128,25 +145,34 @@ async def process_speed(message: Message, state: FSMContext):
     # Сбор всех данных
     data = await state.get_data()
     
+    category_val = ItemCategory(data["category"])
+    condition_val = ItemCondition(data["condition"])
+    speed_val = SellSpeed(data["speed"])
+
     # 2. Обработка через сервисы-моки
     price, time_to_sell = await estimate_price_and_time(
-        data["category"], data["condition"], data["defects"], data["speed"]
+        category_val, condition_val, data["defects"], speed_val
     )
     
     text = await generate_sales_text(
-        data["category"], data["condition"], data["size"], data["brand"], data["defects"]
+        category_val, condition_val, data["size"], data["brand"], data["defects"]
     )
     
-    checklist = await generate_photo_checklist(data["category"], data["defects"])
+    checklist = await generate_photo_checklist(category_val, data["defects"])
     
     # Сохраняем в базу данных (Шаг 4)
-    item = await save_item(
-        telegram_id=message.from_user.id,
-        category=data["category"],
-        title=f"{data['category']} {data['brand'] if data['brand'].lower() != 'не знаю' else ''}".strip(),
-        description=text,
-        price=price
-    )
+    try:
+        item = await save_item(
+            telegram_id=message.from_user.id,
+            category=data["category"],
+            title=f"{CATEGORIES[data['category']]} {data['brand'] if data['brand'].lower() != 'не знаю' else ''}".strip(),
+            description=text,
+            price=price
+        )
+    except DatabaseError:
+        await msg.delete()
+        await message.answer("Сейчас есть техническая проблема с сохранением объявления, попробуйте позже.", reply_markup=ReplyKeyboardRemove())
+        return
     
     # Формируем финальный результат
     final_text = MESSAGES["result_template"].format(

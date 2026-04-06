@@ -2,22 +2,19 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from config import config
-from database.database import create_db_and_tables
-from handlers import base, add_item, active_items, reports
+from handlers import base, add_item, active_items, reports, errors
+from utils.logger import setup_logger
 
 # Инициализация логгера
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 async def main():
-    # Создаем таблицы в БД
-    await create_db_and_tables()
-
     # Создаем объекты бота и диспетчера
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
 
     # Регистрируем роутеры хендлеров
+    dp.include_router(errors.router) # Перехватчик ошибок регистрируется первым
     dp.include_router(base.router)
     dp.include_router(add_item.router)
     dp.include_router(active_items.router)
