@@ -16,8 +16,8 @@ Telegram-бот — умный помощник для занятых родит
 ```mermaid
 flowchart TD
     %% Пользователь и Telegram
-    User((Пользователь)) <--> TG[Telegram API]
-    TG <--> Bot[Bot Dispatcher\n(aiogram)]
+    User(("Пользователь")) <--> TG["Telegram API"]
+    TG <--> Bot["Bot Dispatcher<br>(aiogram)"]
     
     %% Хендлеры (Контроллеры)
     subgraph Handlers
