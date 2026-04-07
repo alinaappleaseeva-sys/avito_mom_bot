@@ -9,9 +9,11 @@ from utils.constants import ItemCategory, ItemCondition, SellSpeed
 from services.price_estimator import estimate_price_and_time
 from services.text_generator import generate_sales_text
 from services.photo_checklist import generate_photo_checklist
-from database.crud import save_item
+from database.crud import save_item, update_item_avito_id, get_item_by_id
 from database.errors import DatabaseError
 from utils.logger import setup_logger
+from services.avito_client import avito_client, AvitoAPIError
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 logger = setup_logger(__name__)
 
@@ -181,11 +183,51 @@ async def process_speed(message: Message, state: FSMContext):
         text=text,
         photo_checklist=checklist
     )
-    final_text += f"\n\n✅ <b>Вещь сохранена в базе (ID: {item.id})!</b>\nКогда опубликуете на Авито, зайдите в раздел /my_items и прикрепите ссылку."
+    final_text += f"\n\n✅ <b>Вещь пока сохранена в черновик (ID: {item.id})!</b>"
+    
+    publish_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Опубликовать на Авито сейчас", callback_data=f"publish_{item.id}")],
+        [InlineKeyboardButton(text="💾 Оставить в черновиках", callback_data=f"draft_{item.id}")]
+    ])
     
     # 3. Отправляем результат
     await msg.delete()
-    await message.answer(final_text, parse_mode="HTML")
+    await message.answer(final_text, reply_markup=publish_markup, parse_mode="HTML")
     
     # Очищаем состояние
     await state.clear()
+
+@router.callback_query(F.data.startswith("publish_"))
+async def process_publish_callback(callback: CallbackQuery):
+    item_id = int(callback.data.split("_")[1])
+    
+    try:
+        item = await get_item_by_id(item_id, callback.from_user.id)
+        if not item:
+            await callback.answer("Вещь не найдена.", show_alert=True)
+            return
+            
+        await callback.message.edit_reply_markup(reply_markup=None) # Убираем кнопки
+        msg = await callback.message.answer("⏳ Отправляю запросы к Авито API...")
+        
+        avito_id = await avito_client.create_listing({
+            "title": item.title,
+            "description": item.description,
+            "price": item.price,
+            "category": item.category
+        })
+        
+        await update_item_avito_id(item_id, callback.from_user.id, avito_id)
+        await msg.edit_text(f"✅ Ура! Объявление успешно опубликовано на Авито (avito_item_id: {avito_id})!\nТеперь вы можете отслеживать статистику просмотров в разделе /my_items.")
+        
+    except AvitoAPIError as e:
+        logger.error(f"Avito publish error for user {callback.from_user.id}: {e}")
+        await msg.edit_text(f"❌ Похоже, вашему профилю недоступна прямая публикация через API, либо произошла ошибка Авито.\nПодробности: {e}\n\nПожалуйста, выставите объявление вручную и прикрепите ссылку в меню /my_items !")
+    except DatabaseError:
+        await msg.edit_text("Объявление опубликовано на Авито, но произошла ошибка сохранения его ID в нашу базу данных.")
+        
+@router.callback_query(F.data.startswith("draft_"))
+async def process_draft_callback(callback: CallbackQuery):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Окей, вещь ждет вас в разделе /my_items. Вы сможете опубликовать ее позже вручную.")
+    await callback.answer()
