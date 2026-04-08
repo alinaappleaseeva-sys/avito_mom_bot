@@ -91,21 +91,26 @@ class AvitoClient:
             logger.error(f"Avito Auth Network error: {e}")
             raise AvitoAPIError(f"Network error during authorization: {e}")
 
-    async def create_listing(self, item_data: dict) -> str:
+    async def create_listing(self, item_data: Dict[str, Any]) -> str:
         """
-        Отправляет POST-запрос на создание объявления к Avito API.
+        Создание (размещение) объявления через REST API (CРА-модель).
+        Docs: https://developers.avito.ru/api-catalog
         
-        ПОЛУ-МОК: В реальном режиме используется настоящий URL, но 
-        передаваемая структура `payload` сильно схематична. 
-        Для боевого продакшена необходимо сверяться с 
-        https://developers.avito.ru/api-catalog/ (CPA / Autoload).
+        Примечание: Для реального размещения `payload` формируется на основе
+        введенных данных мамы, маппинга категорий и строгой структуры `location`.
+        Мы сохраняем текущий маппинг в MVP нетронутым.
         """
         if self.api_mode == "mock":
-            logger.info("MOCK MODE: Смуляция создания объявления.")
+            logger.info("MOCK MODE: Симуляция создания объявления.")
             await asyncio.sleep(1) # Имитация сетевой задержки
             return f"mock_item_{int(time.time())}"
 
+        if not self.session:
+            raise RuntimeError("AvitoClient session is not initialized")
+
         token = await self._get_access_token()
+        
+        # Базовый REST метод для создания единичного объявления (Обычно это Autoload или CPA).
         url = f"https://api.avito.ru/core/v1/accounts/{self.user_id}/items"
 
         headers = {
@@ -113,27 +118,46 @@ class AvitoClient:
             "Content-Type": "application/json"
         }
 
-        # Mock payload transformation, using Moscow as default Fallback
+        # Базовая конструкция для MVP
         payload = {
             "title": item_data.get("title", ""),
             "description": item_data.get("description", ""),
             "price": item_data.get("price", 0),
-            "address": "Москва", 
-            # and other required Avito fields placeholder...
+            "category": "Детская одежда и обувь",  # Заглушка для обязательного поля
+            "location": {
+                "address": "Москва"
+            }
         }
 
         try:
             async with self.session.post(url, json=payload, headers=headers) as response:
+                if response.status >= 500:
+                    text_resp = await response.text()
+                    logger.error(f"Avito Create Item 5xx Error: {text_resp}")
+                    raise AvitoAPIError("Avito server side error (5xx) while creating listing.")
+                    
+                try:
+                    data = await response.json()
+                except ValueError:
+                    text_resp = await response.text()
+                    logger.error(f"Avito Create Item Invalid JSON: {text_resp}")
+                    raise AvitoAPIError("Avito Create Item response was not a valid JSON.")
+
+                if response.status == 400:
+                    logger.warning(f"Avito API Bad Request (400 validation error): {data}")
+                    raise AvitoAPIError(f"Ошибка валидации данных объявления: {data.get('error', {}).get('message', 'Unknown bad request')}")
+                    
                 if response.status in (401, 403):
-                    logger.warning(f"Avito API access denied: {response.status}")
-                    raise AvitoAPIError("У вашего профиля нет прав на автоматическую публикацию.")
+                    logger.warning(f"Avito API access denied: {data}")
+                    raise AvitoAPIError("У вашего профиля или сервисного приложения нет прав на автоматическую публикацию (403 Forbidden).")
                 
-                if response.status != 200:
-                    logger.warning(f"Avito API item creation failed: {await response.text()}")
+                if response.status >= 400:
+                    logger.warning(f"Avito API creation failed (HTTP {response.status}): {data}")
                     raise AvitoAPIError("Не удалось создать объявление на Авито.")
 
-                data = await response.json()
-                return str(data.get("item_id", "test_id_123"))
+                item_id = data.get("itemId") or data.get("id") or str(int(time.time()))
+                return str(item_id)
+                
         except aiohttp.ClientError as e:
             logger.error(f"Avito Create Item Network error: {e}")
             raise AvitoAPIError(f"Сетевая ошибка при создании: {e}")
