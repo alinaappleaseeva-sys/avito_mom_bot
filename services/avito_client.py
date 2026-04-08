@@ -1,7 +1,8 @@
 import aiohttp
 import asyncio
 import time
-from typing import Optional
+from typing import Optional, Dict, Any
+
 from config import config
 from utils.logger import setup_logger
 
@@ -18,25 +19,29 @@ class AvitoClient:
         self.client_secret = config.AVITO_CLIENT_SECRET
         self.user_id = config.AVITO_USER_ID
         self.api_mode = config.AVITO_API_MODE
-        self._access_token = None
-        self._token_expires_at = 0
+        self._access_token: Optional[str] = None
+        self._token_expires_at: float = 0.0
         self.session: Optional[aiohttp.ClientSession] = None
 
-    async def start(self):
-        timeout = aiohttp.ClientTimeout(total=10)
+    async def start(self) -> None:
+        timeout = aiohttp.ClientTimeout(total=15)
         self.session = aiohttp.ClientSession(timeout=timeout)
         logger.info(f"AvitoClient initialized in '{self.api_mode}' mode.")
 
-    async def close(self):
+    async def close(self) -> None:
         if self.session:
             await self.session.close()
 
     async def _get_access_token(self) -> str:
+        """
+        Получение временного токена (OAuth2 client_credentials).
+        Docs: https://developers.avito.ru/api-catalog/auth/documentation
+        """
         if self.api_mode == "mock":
             return "mock_token_123"
 
         if not self.client_id or not self.client_secret:
-            raise AvitoAPIError("Avito credentials not configured")
+            raise AvitoAPIError("Avito credentials not configured in environment.")
 
         if self._access_token and time.time() < self._token_expires_at:
             return self._access_token
@@ -48,17 +53,39 @@ class AvitoClient:
             "client_secret": self.client_secret
         }
 
+        if not self.session:
+            raise RuntimeError("AvitoClient session is not initialized")
+
         try:
-            async with self.session.post(self.auth_url, data=data) as response:
-                res_data = await response.json()
+            async with self.session.post(
+                self.auth_url, 
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            ) as response:
                 
-                if response.status != 200:
-                    logger.error(f"Avito Auth failed: {res_data}")
-                    raise AvitoAPIError(f"Auth failed: {res_data.get('error_description', 'Unknown error')}")
+                if response.status >= 500:
+                    text_resp = await response.text()
+                    logger.error(f"Avito Auth 5xx Server Error: {text_resp}")
+                    raise AvitoAPIError("Avito server side error (5xx).")
+
+                try:
+                    res_data = await response.json()
+                except ValueError:
+                    text_resp = await response.text()
+                    logger.error(f"Avito Auth Invalid JSON response: {text_resp}")
+                    raise AvitoAPIError("Avito Auth response was not a valid JSON.")
+                
+                if response.status >= 400:
+                    logger.error(f"Avito Auth 4xx Error: {res_data}")
+                    raise AvitoAPIError(f"Auth failed: {res_data.get('error', 'unknown')} - {res_data.get('error_description', 'No description')}")
                 
                 self._access_token = res_data.get("access_token")
-                expires_in = res_data.get("expires_in", 3600)
-                self._token_expires_at = time.time() + expires_in - 300 # Buffer
+                expires_in = int(res_data.get("expires_in", 3600))
+                self._token_expires_at = time.time() + expires_in - 300 # Buffer margin 5 mins
+                
+                if not self._access_token:
+                    raise AvitoAPIError("Tokens is missing in 200 OK response")
+                    
                 return self._access_token
         except aiohttp.ClientError as e:
             logger.error(f"Avito Auth Network error: {e}")
