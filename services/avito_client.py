@@ -138,37 +138,76 @@ class AvitoClient:
             logger.error(f"Avito Create Item Network error: {e}")
             raise AvitoAPIError(f"Сетевая ошибка при создании: {e}")
 
-    async def get_listing_stats(self, avito_item_id: str) -> dict:
+    async def get_listing_stats(self, avito_item_id: str) -> Dict[str, Any]:
         """
-        Получает статистику просмотров и контактов.
-        
-        ПОЛУ-МОК: endpoint статистики в реальном режиме может потребовать 
-        уточнения версии API и обязательных query-параметров.
+        Получает сводную статистику по одному объявлению за последние 30 дней.
+        Docs: https://developers.avito.ru/api-catalog
         """
         if self.api_mode == "mock":
             await asyncio.sleep(0.5)
             # Если передали "mock" id
             return {"views": 15, "contacts": 2}
 
+        if not self.session:
+            raise RuntimeError("AvitoClient session is not initialized")
+
         token = await self._get_access_token()
-        url = f"https://api.avito.ru/stats/v1/accounts/{self.user_id}/items/{avito_item_id}"
+        url = f"https://api.avito.ru/stats/v1/accounts/{self.user_id}/items"
         
         headers = {
             "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        import datetime
+        end_date = datetime.date.today()
+        start_date = end_date - datetime.timedelta(days=30)
+        
+        # Avito API docs list itemId as integer in stats request
+        try:
+            item_id_num = int(avito_item_id)
+        except ValueError:
+            logger.error(f"Avito item id '{avito_item_id}' must be numeric.")
+            return {"views": "N/A", "contacts": "N/A"}
+            
+        payload = {
+            "dateFrom": start_date.strftime("%Y-%m-%d"),
+            "dateTo": end_date.strftime("%Y-%m-%d"),
+            "fields": ["views", "contacts"],
+            "itemIds": [item_id_num]
         }
         
         try:
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return {
-                        "views": data.get("stats", {}).get("views", 0),
-                        "contacts": data.get("stats", {}).get("contacts", 0)
-                    }
-                else:
-                    logger.warning(f"Failed to get stats: {response.status}")
+            async with self.session.post(url, json=payload, headers=headers) as response:
+                if response.status >= 500:
+                    logger.error(f"Avito Stats 5xx Error: {await response.text()}")
                     return {"views": "N/A", "contacts": "N/A"}
+                
+                try:
+                    data = await response.json()
+                except ValueError:
+                    logger.error(f"Avito Stats Invalid JSON: {await response.text()}")
+                    return {"views": "N/A", "contacts": "N/A"}
+                    
+                if response.status >= 400:
+                    logger.warning(f"Failed to get stats (HTTP {response.status}): {data}")
+                    return {"views": "N/A", "contacts": "N/A"}
+                
+                # Extracting using standard Avito schema
+                items_data = data.get("result", {}).get("items", [])
+                if not items_data:
+                    return {"views": 0, "contacts": 0}
+                    
+                item_stats = items_data[0].get("stats", [])
+                total_views = sum(day_stat.get("views", 0) for day_stat in item_stats)
+                total_contacts = sum(day_stat.get("contacts", 0) for day_stat in item_stats)
+                
+                return {"views": total_views, "contacts": total_contacts}
         except aiohttp.ClientError as e:
+            logger.error(f"Avito Stats network error: {e}")
+            return {"views": "N/A", "contacts": "N/A"}
+        except Exception as e:
+            logger.error(f"Avito Stats unexpected error: {e}")
             return {"views": "N/A", "contacts": "N/A"}
 
 avito_client = AvitoClient()
