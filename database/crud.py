@@ -85,7 +85,7 @@ async def delete_item(item_id: int, user_id: int):
 async def update_item_avito_id(item_id: int, user_id: int, avito_item_id: str):
     try:
         async with async_session() as session:
-            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_item_id=avito_item_id, status="active")
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_item_id=avito_item_id, status="on_review")
             result = await session.execute(stmt)
             await session.commit()
             return result.rowcount > 0

@@ -20,10 +20,17 @@ async def main():
     dp.include_router(active_items.router)
     dp.include_router(reports.router)
 
+    from services.avito_client import avito_client
+
     # Пропускаем накопившиеся апдейты и запускаем polling
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Bot started!")
-    await dp.start_polling(bot)
+    
+    await avito_client.start()
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await avito_client.close()
 
 if __name__ == "__main__":
     try:

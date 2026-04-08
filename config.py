@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///avito_bot.db"
     
     # Avito Config
+    AVITO_API_MODE: str = "mock" # "mock" or "real"
     AVITO_CLIENT_ID: str = ""
     AVITO_CLIENT_SECRET: str = ""
     AVITO_USER_ID: str = ""
