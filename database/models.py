@@ -18,4 +18,5 @@ class Item(Base):
     price = Column(Integer, nullable=False)
     status = Column(String, default="pending") # pending, active, sold
     avito_url = Column(String, nullable=True)
+    avito_item_id = Column(String, nullable=True) # ID from Avito API
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -6,6 +6,7 @@ from aiogram.fsm.state import StatesGroup, State
 
 from database.crud import get_user_items, update_item_url, delete_item
 from database.errors import DatabaseError
+from services.avito_client import avito_client
 
 router = Router()
 
@@ -31,13 +32,27 @@ async def show_my_items(message: Message):
         text = f"{status_emoji} <b>{item.title}</b>\nЦена: {item.price} руб."
         
         if item.status == "pending":
-            text += "\nСтатус: ожидает публикации (нет ссылки)."
+            text += "\nСтатус: ожидает публикации."
             markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔗 Добавить ссылку с Авито", callback_data=f"add_link_{item.id}")],
+                [InlineKeyboardButton(text="🔗 Добавить ссылку вручную", callback_data=f"add_link_{item.id}")],
                 [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
             ])
         else:
-            text += f"\nСтатус: продается.\nСсылка: {item.avito_url}"
+            if item.status == "on_review":
+                text += "\nСтатус: на модерации Авито."
+            else:
+                text += "\nСтатус: продается."
+                
+            if item.avito_url:
+                text += f"\nСсылка: {item.avito_url}"
+                
+            if item.avito_item_id:
+                stats = await avito_client.get_listing_stats(item.avito_item_id)
+                if stats['views'] == "N/A":
+                    text += "\n👁️ Просмотров: N/A | 💬 Контактов: N/A (Статистика может быть недоступна или устаревшей)"
+                else:
+                    text += f"\n👁️ Просмотров: {stats['views']} | 💬 Контактов: {stats['contacts']}"
+                
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
             ])
