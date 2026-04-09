@@ -47,11 +47,12 @@ async def show_my_items(message: Message):
                 text += f"\nСсылка: {item.avito_url}"
                 
             if item.avito_item_id:
-                stats = await avito_client.get_listing_stats(item.avito_item_id)
-                if stats['views'] == "N/A":
-                    text += "\n👁️ Просмотров: N/A | 💬 Контактов: N/A (Статистика может быть недоступна или устаревшей)"
-                else:
+                from services.avito_client import AvitoAPIError
+                try:
+                    stats = await avito_client.get_listing_stats(item.avito_item_id)
                     text += f"\n👁️ Просмотров: {stats['views']} | 💬 Контактов: {stats['contacts']}"
+                except AvitoAPIError:
+                    text += "\n👁️ Просмотров: недоступно | 💬 Контактов: недоступно (Ошибка получения статистики Авито)"
                 
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
