@@ -12,6 +12,10 @@ async def main():
     # Создаем объекты бота и диспетчера
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
+    # Инициализация и регистрация middleware для rate-limit
+    from utils.middlewares import RateLimitMiddleware
+    dp.message.middleware(RateLimitMiddleware(limit_seconds=1))
+    dp.callback_query.middleware(RateLimitMiddleware(limit_seconds=1))
 
     # Регистрируем роутеры хендлеров
     dp.include_router(errors.router) # Перехватчик ошибок регистрируется первым

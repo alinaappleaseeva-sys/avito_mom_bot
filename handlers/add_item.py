@@ -90,6 +90,10 @@ async def process_condition(message: Message, state: FSMContext):
 
 @router.message(ItemForm.size)
 async def process_size(message: Message, state: FSMContext):
+    if message.text and len(message.text) > 50:
+        await message.answer("Слишком длинный текст для размера (макс. 50 символов). Пожалуйста, напишите короче.")
+        return
+        
     await state.update_data(size=message.text)
     await state.set_state(ItemForm.brand)
     
@@ -101,6 +105,10 @@ async def process_size(message: Message, state: FSMContext):
 
 @router.message(ItemForm.brand)
 async def process_brand(message: Message, state: FSMContext):
+    if message.text and len(message.text) > 100:
+        await message.answer("Слишком длинное название бренда (макс. 100 символов). Пожалуйста, напишите короче.")
+        return
+        
     await state.update_data(brand=message.text)
     await state.set_state(ItemForm.defects)
     
@@ -112,6 +120,12 @@ async def process_brand(message: Message, state: FSMContext):
 
 @router.message(ItemForm.defects, F.photo)
 async def process_defects_photo(message: Message, state: FSMContext):
+    # Rule 20: Limit upload sizes
+    photo = message.photo[-1]
+    if photo.file_size and photo.file_size > 5 * 1024 * 1024:
+        await message.answer("Фото слишком большое! Пожалуйста, загрузите фото размером до 5 МБ.")
+        return
+
     # Мок обработки фото(vision API)
     mock_defect_description = "следы использования (определено по фото)"
     await state.update_data(defects=mock_defect_description)
@@ -123,6 +137,10 @@ async def process_defects_photo(message: Message, state: FSMContext):
 
 @router.message(ItemForm.defects, F.text)
 async def process_defects_text(message: Message, state: FSMContext):
+    if message.text and len(message.text) > 500:
+        await message.answer("Слишком длинное описание дефектов (макс. 500 символов). Пожалуйста, будьте кратки.")
+        return
+        
     await state.update_data(defects=message.text)
     await state.set_state(ItemForm.speed)
     await message.answer(
