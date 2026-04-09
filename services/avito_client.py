@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 
 from config import config
 from utils.logger import setup_logger
+from database.models import Item
+from services.avito_mapper import build_avito_payload_for_item
 
 logger = setup_logger(__name__)
 
@@ -93,7 +95,7 @@ class AvitoClient:
             logger.error(f"Avito Auth Network error: {e}")
             raise AvitoAPIError(f"Network error during authorization: {e}")
 
-    async def create_listing(self, item: Any) -> str:
+    async def create_listing(self, item: Item) -> str:
         """
         Создание (размещение) объявления через REST API (CРА-модель).
         Docs: https://developers.avito.ru/api-catalog
@@ -117,7 +119,6 @@ class AvitoClient:
         }
 
         # Используем маппер для формирования payload
-        from services.avito_mapper import build_avito_payload_for_item
         payload = build_avito_payload_for_item(item)
 
         try:
