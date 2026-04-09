@@ -76,11 +76,18 @@ async def process_url_input(message: Message, state: FSMContext):
     item_id = data["item_id"]
     url = message.text
     
+    from urllib.parse import urlparse
+    
     if len(url) > 200:
         await message.answer("Ссылка слишком длинная. Убедитесь, что вы скопировали правильную ссылку.")
         return
 
-    if "avito.ru" not in url.lower():
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        await message.answer("Неверный формат ссылки. Убедитесь, что это http/https ссылка.")
+        return
+
+    if parsed.netloc != "avito.ru" and not parsed.netloc.endswith(".avito.ru"):
         await message.answer("Кажется, это не ссылка на Авито. Попробуйте еще раз или нажмите /cancel.")
         return
         

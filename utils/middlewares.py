@@ -7,8 +7,9 @@ from aiogram.types import Message, CallbackQuery, TelegramObject
 logger = logging.getLogger(__name__)
 
 class RateLimitMiddleware(BaseMiddleware):
-    def __init__(self, limit_seconds: int = 1):
+    def __init__(self, limit_seconds: int = 1, ttl_seconds: int = 3600):
         self.limit_seconds = limit_seconds
+        self.ttl_seconds = ttl_seconds
         self.user_timestamps = {}
 
     async def __call__(
@@ -26,6 +27,13 @@ class RateLimitMiddleware(BaseMiddleware):
 
         if user_id is not None:
             now = asyncio.get_event_loop().time()
+            
+            # TTL cleanup to prevent memory leaks
+            if self.ttl_seconds is not None:
+                keys_to_delete = [k for k, v in self.user_timestamps.items() if now - v > self.ttl_seconds]
+                for k in keys_to_delete:
+                    del self.user_timestamps[k]
+
             last_time = self.user_timestamps.get(user_id, 0)
             
             if now - last_time < self.limit_seconds:
