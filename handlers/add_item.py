@@ -210,12 +210,7 @@ async def process_publish_callback(callback: CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=None) # Убираем кнопки
         msg = await callback.message.answer("⏳ Отправляю запросы к Авито API...")
         
-        avito_id = await avito_client.create_listing({
-            "title": item.title,
-            "description": item.description,
-            "price": item.price,
-            "category": item.category
-        })
+        avito_id = await avito_client.create_listing(item)
         
         await update_item_avito_id(item_id, callback.from_user.id, avito_id)
         await msg.edit_text(f"✅ Ура! Объявление успешно опубликовано на Авито (avito_item_id: {avito_id})!\nТеперь вы можете отслеживать статистику просмотров в разделе /my_items.")

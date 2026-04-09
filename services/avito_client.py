@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any
 
 from config import config
 from utils.logger import setup_logger
+from database.models import Item
+from services.avito_mapper import build_avito_payload_for_item
 
 logger = setup_logger(__name__)
 
@@ -93,14 +95,10 @@ class AvitoClient:
             logger.error(f"Avito Auth Network error: {e}")
             raise AvitoAPIError(f"Network error during authorization: {e}")
 
-    async def create_listing(self, item_data: Dict[str, Any]) -> str:
+    async def create_listing(self, item: Item) -> str:
         """
         Создание (размещение) объявления через REST API (CРА-модель).
         Docs: https://developers.avito.ru/api-catalog
-        
-        Примечание: Для реального размещения `payload` формируется на основе
-        введенных данных мамы, маппинга категорий и строгой структуры `location`.
-        Мы сохраняем текущий маппинг в MVP нетронутым.
         """
         if self.api_mode == "mock":
             logger.info("MOCK MODE: Симуляция создания объявления.")
@@ -120,16 +118,8 @@ class AvitoClient:
             "Content-Type": "application/json"
         }
 
-        # Базовая конструкция для MVP
-        payload = {
-            "title": item_data.get("title", ""),
-            "description": item_data.get("description", ""),
-            "price": item_data.get("price", 0),
-            "category": "Детская одежда и обувь",  # Заглушка для обязательного поля
-            "location": {
-                "address": "Москва"
-            }
-        }
+        # Используем маппер для формирования payload
+        payload = build_avito_payload_for_item(item)
 
         try:
             async with self.session.post(url, json=payload, headers=headers) as response:
