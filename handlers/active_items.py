@@ -76,6 +76,10 @@ async def process_url_input(message: Message, state: FSMContext):
     item_id = data["item_id"]
     url = message.text
     
+    if len(url) > 200:
+        await message.answer("Ссылка слишком длинная. Убедитесь, что вы скопировали правильную ссылку.")
+        return
+
     if "avito.ru" not in url.lower():
         await message.answer("Кажется, это не ссылка на Авито. Попробуйте еще раз или нажмите /cancel.")
         return

@@ -37,6 +37,7 @@ async def save_item(telegram_id: int, category: str, title: str, description: st
             )
             session.add(new_item)
             await session.commit()
+            logger.info(f"User {telegram_id} created a new item: {new_item.id}")
             return new_item
     except SQLAlchemyError as e:
         logger.error(f"DB Error saving item for user {telegram_id}: {e}")
@@ -57,6 +58,8 @@ async def update_item_url(item_id: int, user_id: int, url: str):
             stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_url=url, status="active")
             result = await session.execute(stmt)
             await session.commit()
+            if result.rowcount > 0:
+                logger.info(f"User {user_id} updated URL for item {item_id}")
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error updating item {item_id}: {e}")
@@ -77,6 +80,8 @@ async def delete_item(item_id: int, user_id: int):
             stmt = delete(Item).where(Item.id == item_id, Item.user_id == user_id)
             result = await session.execute(stmt)
             await session.commit()
+            if result.rowcount > 0:
+                logger.info(f"User {user_id} deleted item {item_id}")
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error deleting item {item_id}: {e}")
@@ -92,3 +97,18 @@ async def update_item_avito_id(item_id: int, user_id: int, avito_item_id: str):
     except SQLAlchemyError as e:
         logger.error(f"DB Error updating avito_item_id for item {item_id}: {e}")
         raise DatabaseError(f"Failed to update Avito Item ID: {e}")
+
+async def delete_user_account(telegram_id: int):
+    try:
+        async with async_session() as session:
+            # First, delete all user items
+            await session.execute(delete(Item).where(Item.user_id == telegram_id))
+            # Then delete the user
+            result = await session.execute(delete(User).where(User.telegram_id == telegram_id))
+            await session.commit()
+            if result.rowcount > 0:
+                logger.info(f"User {telegram_id} successfully deleted their account.")
+            return result.rowcount > 0
+    except SQLAlchemyError as e:
+        logger.error(f"DB Error deleting account for user {telegram_id}: {e}")
+        raise DatabaseError(f"Failed to delete user account: {e}")
