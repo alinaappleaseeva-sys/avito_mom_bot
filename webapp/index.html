@@ -92,7 +92,7 @@
                 clearTimeout(timeoutId);
 
                 // Обработка статус-кодов как запрошено в задаче
-                if (response.status === 200) {
+                if (response.ok) {
                     const data = await response.json();
                     
                     // Сохраняем JWT для будущих запросов
@@ -102,15 +102,19 @@
                     document.getElementById('successState').classList.remove('hidden');
                     document.getElementById('userName').innerText = data.user.first_name || data.user.username;
                     document.getElementById('userRole').innerText = data.user.role;
-                } 
-                else if (response.status === 401 || response.status === 422) {
-                    throw new Error("Ошибка верификации (401/422). Пожалуйста, перезапустите Mini App.");
-                } 
-                else if (response.status === 503) {
-                    throw new Error("Сервис временно недоступен, база не отвечает. Попробуйте зайти позже.");
-                } 
-                else {
-                    throw new Error(`Внутренняя ошибка сервера. Код: ${response.status}`);
+                } else {
+                    const data = await response.json();
+                    const errorCode = data?.error?.code || 'UNKNOWN';
+                    
+                    if (errorCode === 'UNAUTHORIZED' || errorCode === 'BAD_REQUEST') {
+                        throw new Error("Ошибка верификации. Пожалуйста, перезапустите Mini App.");
+                    } else if (errorCode === 'SERVICE_UNAVAILABLE') {
+                        throw new Error("Сервис временно недоступен, база не отвечает. Попробуйте зайти позже.");
+                    } else if (errorCode === 'GATEWAY_TIMEOUT') {
+                        throw new Error("Не удалось дождаться ответа от базы данных. Попробуйте снова чуть позже.");
+                    } else {
+                        throw new Error(`Внутренняя ошибка сервера: ${data?.error?.message || 'Неизвестно'}`);
+                    }
                 }
             } catch (err) {
                 clearTimeout(timeoutId);

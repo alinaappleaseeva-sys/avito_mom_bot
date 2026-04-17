@@ -13,6 +13,15 @@ import jwt
 
 logger = setup_logger(__name__)
 
+def build_error_response(code: str, message: str, status: int) -> web.Response:
+    """Утилита для стандартизированного отформатированного ответа на ошибки API."""
+    return web.json_response({
+        "error": {
+            "code": code,
+            "message": message
+        }
+    }, status=status)
+
 async def auth_telegram_handler(request: web.Request) -> web.Response:
     """
     Эндпоинт авторизации Telegram Mini App.
@@ -21,18 +30,18 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        return web.json_response({"error": "Invalid JSON"}, status=400)
+        return build_error_response("BAD_REQUEST", "Invalid JSON body", 400)
         
     init_data = body.get("init_data")
     if not init_data:
-        return web.json_response({"error": "Missing 'init_data' in payload"}, status=400)
+        return build_error_response("BAD_REQUEST", "Missing 'init_data' in payload", 400)
         
     # Валидация подписи initData
     try:
         tg_user_data = validate_telegram_init_data(init_data, config.BOT_TOKEN)
     except InvalidInitDataError as e:
         logger.warning(f"Failed initData validation: {e}")
-        return web.json_response({"error": "Unauthorized", "details": str(e)}, status=401)
+        return build_error_response("UNAUTHORIZED", f"Unauthorized: {str(e)}", 401)
         
     telegram_id = int(tg_user_data["id"])
     username = tg_user_data.get("username")
@@ -66,12 +75,15 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
                     "role": user.role
                 }
             })
-    except (SQLAlchemyError, OperationalError, DatabaseError, asyncio.TimeoutError) as e:
+    except asyncio.TimeoutError as e:
+        logger.error(f"Timeout during auth DB step: {e}")
+        return build_error_response("GATEWAY_TIMEOUT", "Database timeout elapsed", 504)
+    except (SQLAlchemyError, OperationalError, DatabaseError) as e:
         logger.error(f"Database unavailable during auth: {e}")
-        return web.json_response({"error": "Service Unavailable", "details": "DB unavailable or overloaded. Try again later."}, status=503)
+        return build_error_response("SERVICE_UNAVAILABLE", "Database unavailable or overloaded", 503)
     except Exception as e:
         logger.exception(f"Unexpected error during user authorization step: {e}")
-        return web.json_response({"error": "Internal Server Error"}, status=500)
+        return build_error_response("INTERNAL_SERVER_ERROR", "Internal Server Error", 500)
 
 @web.middleware
 async def jwt_auth_middleware(request: web.Request, handler) -> web.Response:
@@ -86,7 +98,7 @@ async def jwt_auth_middleware(request: web.Request, handler) -> web.Response:
         
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return web.json_response({"error": "Missing or invalid Authorization header"}, status=401)
+        return build_error_response("UNAUTHORIZED", "Missing or invalid Authorization header", 401)
         
     token = auth_header.split(" ")[1]
     
@@ -94,9 +106,9 @@ async def jwt_auth_middleware(request: web.Request, handler) -> web.Response:
         payload = decode_access_token(token)
         request['user'] = payload
     except jwt.ExpiredSignatureError:
-        return web.json_response({"error": "Token has expired"}, status=401)
+        return build_error_response("UNAUTHORIZED", "Token has expired", 401)
     except jwt.InvalidTokenError:
-        return web.json_response({"error": "Invalid token"}, status=401)
+        return build_error_response("UNAUTHORIZED", "Invalid token signature", 401)
         
     return await handler(request)
 
