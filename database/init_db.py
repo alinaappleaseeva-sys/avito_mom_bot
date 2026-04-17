@@ -2,6 +2,7 @@ import asyncio
 import sys
 from sqlalchemy.exc import SQLAlchemyError
 from database.database import create_db_and_tables
+from database import models # VERY IMPORTANT: to register metadata
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)

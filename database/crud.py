@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.sql import func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from database.database import async_session
 from database.models import User, Item
 from database.errors import DatabaseError
@@ -11,15 +11,69 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+from config import config
+
+async def get_user_by_telegram_id(session, telegram_id: int) -> User | None:
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    return result.scalars().first()
+
+async def create_user(
+    session, 
+    telegram_id: int, 
+    username: str = None, 
+    first_name: str = None, 
+    last_name: str = None, 
+    role: str = "user"
+) -> User:
+    user = User(
+        telegram_id=telegram_id,
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
+        role=role
+    )
+    session.add(user)
+    await session.commit()
+    return user
+
+async def get_or_create_user_from_telegram(
+    session, 
+    *, 
+    telegram_id: int, 
+    username: str = None, 
+    first_name: str = None, 
+    last_name: str = None, 
+    is_admin: bool = False
+) -> User:
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if user:
+        return user
+    
+    role = "admin" if is_admin or telegram_id == config.TELEGRAM_ADMIN_ID else "user"
+    try:
+        return await create_user(
+            session,
+            telegram_id=telegram_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            role=role
+        )
+    except IntegrityError:
+        # Race condition: user was created via another concurrent request
+        await session.rollback()
+        user = await get_user_by_telegram_id(session, telegram_id)
+        if user:
+            return user
+        raise
+
 async def _get_or_create_user(telegram_id: int):
+    """Legacy helper for existing bot handlers, uses dedicated session."""
     try:
         async with async_session() as session:
-            result = await session.execute(select(User).where(User.telegram_id == telegram_id))
-            user = result.scalars().first()
+            user = await get_user_by_telegram_id(session, telegram_id)
             if not user:
-                user = User(telegram_id=telegram_id)
-                session.add(user)
-                await session.commit()
+                user = await create_user(session, telegram_id=telegram_id)
             return user
     except SQLAlchemyError as e:
         logger.error(f"DB Error getting/creating user {telegram_id}: {e}")
