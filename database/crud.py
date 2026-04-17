@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
 from sqlalchemy.sql import func
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from database.database import async_session
 from database.models import User, Item
 from database.errors import DatabaseError
@@ -50,14 +50,22 @@ async def get_or_create_user_from_telegram(
         return user
     
     role = "admin" if is_admin or telegram_id == config.TELEGRAM_ADMIN_ID else "user"
-    return await create_user(
-        session,
-        telegram_id=telegram_id,
-        username=username,
-        first_name=first_name,
-        last_name=last_name,
-        role=role
-    )
+    try:
+        return await create_user(
+            session,
+            telegram_id=telegram_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            role=role
+        )
+    except IntegrityError:
+        # Race condition: user was created via another concurrent request
+        await session.rollback()
+        user = await get_user_by_telegram_id(session, telegram_id)
+        if user:
+            return user
+        raise
 
 async def _get_or_create_user(telegram_id: int):
     """Legacy helper for existing bot handlers, uses dedicated session."""

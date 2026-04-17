@@ -3,6 +3,9 @@ import hashlib
 import json
 import time
 from urllib.parse import parse_qsl
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 class InvalidInitDataError(Exception):
     """Exception raised when Telegram init data is invalid or expired."""
@@ -29,6 +32,7 @@ def validate_telegram_init_data(init_data: str, bot_token: str, max_age: int = 3
     parsed_data = dict(parse_qsl(init_data))
     
     if "hash" not in parsed_data:
+        logger.warning("InitData Validation Failed: Missing 'hash' parameter.")
         raise InvalidInitDataError("Missing 'hash' in init data.")
         
     hash_val = parsed_data.pop("hash")
@@ -38,10 +42,20 @@ def validate_telegram_init_data(init_data: str, bot_token: str, max_age: int = 3
     if auth_date:
         try:
             auth_timestamp = int(auth_date)
+            current_time = int(time.time())
+            
             # if the payload is older than max_age it is invalid (to prevent replay attacks)
-            if time.time() - auth_timestamp > max_age:
+            if current_time - auth_timestamp > max_age:
+                logger.warning(f"InitData Validation Failed: Data expired (age: {current_time - auth_timestamp}s, max: {max_age}s).")
                 raise InvalidInitDataError("Init data is expired.")
+                
+            # strict check against future timestamp manipulation
+            if auth_timestamp - current_time > 5:  # allow 5 sec clock skew
+                logger.warning(f"InitData Validation Failed: auth_date is in the future ({auth_timestamp} > {current_time}).")
+                raise InvalidInitDataError("Init data 'auth_date' is in the future.")
+
         except ValueError:
+            logger.warning("InitData Validation Failed: Invalid 'auth_date' format.")
             raise InvalidInitDataError("Invalid 'auth_date' format.")
             
     # Sort remaining pairs alphabetically by key and build data_check_string
@@ -56,10 +70,12 @@ def validate_telegram_init_data(init_data: str, bot_token: str, max_age: int = 3
     calculated_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
     
     if not hmac.compare_digest(calculated_hash, hash_val):
+        logger.warning("InitData Validation Failed: Invalid hash signature.")
         raise InvalidInitDataError("Invalid hash signature.")
         
     # Validation successful, now extract user payload
     if "user" not in parsed_data:
+        logger.warning("InitData Validation Failed: Missing 'user' payload.")
         raise InvalidInitDataError("Missing 'user' payload in init data.")
         
     try:
@@ -71,4 +87,5 @@ def validate_telegram_init_data(init_data: str, bot_token: str, max_age: int = 3
             "last_name": user_data.get("last_name")
         }
     except json.JSONDecodeError:
+        logger.warning("InitData Validation Failed: Malformed 'user' JSON format.")
         raise InvalidInitDataError("Invalid 'user' JSON format.")

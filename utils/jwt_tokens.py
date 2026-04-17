@@ -2,7 +2,7 @@ import jwt
 import time
 from config import config
 
-def create_access_token(user_id: int, telegram_id: int, role: str, expires_in: int = 3600) -> str:
+def create_access_token(user_id: int, telegram_id: int, role: str, plan: str = "free", expires_in: int = 3600) -> str:
     """
     Создает JWT токен для авторизованного пользователя.
     
@@ -10,6 +10,7 @@ def create_access_token(user_id: int, telegram_id: int, role: str, expires_in: i
         user_id: внутренний ID пользователя в БД.
         telegram_id: идентификатор в Telegram.
         role: роль (user, admin).
+        plan: подписка (по умолчанию free).
         expires_in: время жизни токена в секундах (по умолчанию 1 час).
         
     Returns:
@@ -20,6 +21,7 @@ def create_access_token(user_id: int, telegram_id: int, role: str, expires_in: i
         "sub": str(user_id),
         "telegram_id": telegram_id,
         "role": role,
+        "plan": plan,
         "iat": now,
         "exp": now + expires_in
     }

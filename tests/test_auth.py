@@ -141,3 +141,26 @@ async def test_get_user_existing_does_not_override_role(db_session, monkeypatch)
     )
     assert user2.id == user1.id
     assert user2.role == "admin" # stays admin
+
+async def test_reauthorization_existing_user(db_session, monkeypatch):
+    """Тест на повторную авторизацию (вход после регистрации)"""
+    monkeypatch.setattr(config, "TELEGRAM_ADMIN_ID", 9999)
+    # First login
+    user1 = await get_or_create_user_from_telegram(
+        db_session,
+        telegram_id=555,
+        username="reauth",
+        is_admin=False
+    )
+    
+    # Second login (same telegram ID)
+    user2 = await get_or_create_user_from_telegram(
+        db_session,
+        telegram_id=555,
+        username="reauth_changed",  # Even if they change username on TG
+        is_admin=False
+    )
+    
+    assert user1.id == user2.id
+    # Currently we don't update username on login, but the object fetched should be the exact same DB row
+    assert user1.telegram_id == user2.telegram_id
