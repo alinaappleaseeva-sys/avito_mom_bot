@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.database import async_session
 from database.models import User, Item
 from database.errors import DatabaseError
+from utils.constants import ItemStatus
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -33,7 +34,7 @@ async def save_item(telegram_id: int, category: str, title: str, description: st
                 title=title,
                 description=description,
                 price=price,
-                status="pending"
+                status=ItemStatus.DRAFT.value
             )
             session.add(new_item)
             await session.commit()
@@ -55,7 +56,7 @@ async def get_user_items(telegram_id: int):
 async def update_item_url(item_id: int, user_id: int, url: str):
     try:
         async with async_session() as session:
-            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_url=url, status="active")
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_url=url, status=ItemStatus.ACTIVE.value)
             result = await session.execute(stmt)
             await session.commit()
             if result.rowcount > 0:
@@ -90,13 +91,24 @@ async def delete_item(item_id: int, user_id: int):
 async def update_item_avito_id(item_id: int, user_id: int, avito_item_id: str):
     try:
         async with async_session() as session:
-            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_item_id=avito_item_id, status="on_review")
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(avito_item_id=avito_item_id, status=ItemStatus.PENDING_MODERATION.value)
             result = await session.execute(stmt)
             await session.commit()
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error updating avito_item_id for item {item_id}: {e}")
         raise DatabaseError(f"Failed to update Avito Item ID: {e}")
+
+async def update_item_status(item_id: int, user_id: int, status: str):
+    try:
+        async with async_session() as session:
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(status=status)
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount > 0
+    except SQLAlchemyError as e:
+        logger.error(f"DB Error updating status for item {item_id}: {e}")
+        raise DatabaseError(f"Failed to update item status: {e}")
 
 async def delete_user_account(telegram_id: int):
     try:

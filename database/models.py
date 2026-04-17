@@ -16,7 +16,7 @@ class Item(Base):
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
     price = Column(Integer, nullable=False)
-    status = Column(String, default="pending") # pending, active, sold
+    status = Column(String, default="draft") # draft, pending_moderation, active, rejected, archived
     avito_url = Column(String, nullable=True)
     avito_item_id = Column(String, nullable=True) # ID from Avito API
     created_at = Column(DateTime(timezone=True), server_default=func.now())

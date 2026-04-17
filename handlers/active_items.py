@@ -4,9 +4,11 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from database.crud import get_user_items, update_item_url, delete_item
+from database.crud import get_user_items, update_item_url, delete_item, update_item_status
 from database.errors import DatabaseError
-from services.avito_client import avito_client
+from services.avito_client import avito_client, AvitoAPIError
+from utils.constants import ItemStatus
+from services.avito_mapper import map_avito_status_to_domain
 
 router = Router()
 
@@ -28,32 +30,67 @@ async def show_my_items(message: Message):
         
     await message.answer("Ваши вещи:")
     for item in items:
-        status_emoji = "⏳" if item.status == "pending" else "✅"
-        text = f"{status_emoji} <b>{item.title}</b>\nЦена: {item.price} руб."
+        # Fallback for old data DB values without doing full migration
+        db_status = item.status
+        if db_status == "pending": db_status = ItemStatus.DRAFT.value
+        if db_status == "on_review": db_status = ItemStatus.PENDING_MODERATION.value
+
+        # Fetch new status if Avito Item ID is present
+        reject_reason = None
+        if item.avito_item_id:
+            try:
+                info = await avito_client.get_item_info(item.avito_item_id)
+                avito_status = info.get("status")
+                if avito_status:
+                    new_domain_status = map_avito_status_to_domain(avito_status)
+                    reject_reason = info.get("reject_reason")
+                    if new_domain_status != db_status:
+                        await update_item_status(item.id, message.from_user.id, new_domain_status)
+                        db_status = new_domain_status
+            except AvitoAPIError:
+                pass # Proceed with existing db_status if api fails
+
+        # Determing UI
+        if db_status == ItemStatus.DRAFT.value:
+            status_emoji = "📝"
+            status_text = "Черновик (ожидает публикации)"
+        elif db_status == ItemStatus.PENDING_MODERATION.value:
+            status_emoji = "🧐"
+            status_text = "На проверке (Авито проверяет объявление)"
+        elif db_status == ItemStatus.ACTIVE.value:
+            status_emoji = "✅"
+            status_text = "Активно (продается)"
+        elif db_status == ItemStatus.REJECTED.value:
+            status_emoji = "❌"
+            status_text = "Отклонено"
+            if reject_reason:
+                status_text += f"\nПричина: <i>{reject_reason}</i>"
+        elif db_status == ItemStatus.ARCHIVED.value:
+            status_emoji = "🗄️"
+            status_text = "В архиве"
+        else:
+            status_emoji = "❓"
+            status_text = "Неизвестно"
+
+        text = f"{status_emoji} <b>{item.title}</b>\nЦена: {item.price} руб.\nСтатус: {status_text}"
         
-        if item.status == "pending":
-            text += "\nСтатус: ожидает публикации."
+        markup = None
+        if db_status == ItemStatus.DRAFT.value:
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 Добавить ссылку вручную", callback_data=f"add_link_{item.id}")],
                 [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
             ])
         else:
-            if item.status == "on_review":
-                text += "\nСтатус: на модерации Авито."
-            else:
-                text += "\nСтатус: продается."
-                
-            if item.avito_url:
-                text += f"\nСсылка: {item.avito_url}"
-                
-            if item.avito_item_id:
-                from services.avito_client import AvitoAPIError
-                try:
-                    stats = await avito_client.get_listing_stats(item.avito_item_id)
-                    text += f"\n👁️ Просмотров: {stats['views']} | 💬 Контактов: {stats['contacts']}"
-                except AvitoAPIError:
-                    text += "\n👁️ Просмотров: недоступно | 💬 Контактов: недоступно (Ошибка получения статистики Авито)"
-                
+            if db_status == ItemStatus.ACTIVE.value:
+                if item.avito_url:
+                    text += f"\nСсылка: {item.avito_url}"
+                if item.avito_item_id:
+                    try:
+                        stats = await avito_client.get_listing_stats(item.avito_item_id)
+                        text += f"\n👁️ Просмотров: {stats['views']} | 💬 Контактов: {stats['contacts']}"
+                    except AvitoAPIError:
+                        text += "\n👁️ Просмотров: недоступно | 💬 Контактов: недоступно (Ошибка)"
+            
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
             ])

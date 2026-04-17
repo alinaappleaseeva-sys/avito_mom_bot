@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from utils.constants import ItemCategory, ItemCondition
+from utils.constants import ItemCategory, ItemCondition, ItemStatus
 from database.models import Item
 from utils.logger import setup_logger
 
@@ -55,3 +55,28 @@ def build_avito_payload_for_item(item: Item) -> Dict[str, Any]:
     # от расширения доменной модели Item
     
     return payload
+
+AVITO_STATUS_MAP = {
+    "active": ItemStatus.ACTIVE,
+    "moderation": ItemStatus.PENDING_MODERATION,
+    "in_moderation": ItemStatus.PENDING_MODERATION,
+    "rejected": ItemStatus.REJECTED,
+    "blocked": ItemStatus.REJECTED,
+    "old": ItemStatus.ARCHIVED,
+    "archived": ItemStatus.ARCHIVED,
+    "draft": ItemStatus.DRAFT,
+}
+
+def map_avito_status_to_domain(avito_status: str) -> str:
+    """
+    Маппинг статуса из Avito API в нашу доменную модель ItemStatus.
+    """
+    # Нормализуем статус для надежности
+    normalized = str(avito_status).lower().strip()
+    status_enum = AVITO_STATUS_MAP.get(normalized)
+    
+    if status_enum:
+        return status_enum.value
+        
+    logger.warning(f"Неизвестный статус от Avito API: '{avito_status}'. Используем эвристическую оценку (Draft).")
+    return ItemStatus.DRAFT.value
