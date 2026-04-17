@@ -164,3 +164,67 @@ async def test_reauthorization_existing_user(db_session, monkeypatch):
     assert user1.id == user2.id
     # Currently we don't update username on login, but the object fetched should be the exact same DB row
     assert user1.telegram_id == user2.telegram_id
+
+# ----------------------------
+# 3. Tests for HTTP API Error Formatting
+# ----------------------------
+import json
+import asyncio
+from aiohttp.test_utils import make_mocked_request
+from sqlalchemy.exc import OperationalError
+from services.auth_http import auth_telegram_handler
+from utils.telegram_init_data import InvalidInitDataError
+
+async def test_auth_http_handler_timeout(monkeypatch):
+    """Test 504 Gateway Timeout JSON structure when DB times out."""
+    async def mock_get_or_create(*args, **kwargs):
+        raise asyncio.TimeoutError("DB Timeout")
+        
+    # Mock validate output so it proceeds to DB
+    monkeypatch.setattr("services.auth_http.validate_telegram_init_data", lambda *a, **k: {"id": 1, "username": "test"})
+    # Mock db
+    monkeypatch.setattr("services.auth_http.get_or_create_user_from_telegram", mock_get_or_create)
+    
+    req = make_mocked_request("POST", "/auth/telegram")
+    # inject mock payload
+    req._read_bytes = json.dumps({"init_data": "mock_data"}).encode('utf-8')
+    
+    response = await auth_telegram_handler(req)
+    
+    assert response.status == 504
+    data = json.loads(response.body)
+    assert data["error"]["code"] == "GATEWAY_TIMEOUT"
+    
+async def test_auth_http_handler_db_unavailable(monkeypatch):
+    """Test 503 Service Unavailable JSON structure when DB fails."""
+    async def mock_get_or_create(*args, **kwargs):
+        from sqlalchemy.exc import OperationalError
+        raise OperationalError("SELECT", {}, "Connection refused")
+        
+    monkeypatch.setattr("services.auth_http.validate_telegram_init_data", lambda *a, **k: {"id": 1, "username": "test"})
+    monkeypatch.setattr("services.auth_http.get_or_create_user_from_telegram", mock_get_or_create)
+    
+    req = make_mocked_request("POST", "/auth/telegram")
+    req._read_bytes = json.dumps({"init_data": "mock_data"}).encode('utf-8')
+    
+    response = await auth_telegram_handler(req)
+    
+    assert response.status == 503
+    data = json.loads(response.body)
+    assert data["error"]["code"] == "SERVICE_UNAVAILABLE"
+
+async def test_auth_http_handler_unauthorized(monkeypatch):
+    """Test 401 Unauthorized JSON structure when initData fails validation."""
+    def mock_validate(*args, **kwargs):
+        raise InvalidInitDataError("Tampered hash")
+        
+    monkeypatch.setattr("services.auth_http.validate_telegram_init_data", mock_validate)
+    
+    req = make_mocked_request("POST", "/auth/telegram")
+    req._read_bytes = json.dumps({"init_data": "bad_data"}).encode('utf-8')
+    
+    response = await auth_telegram_handler(req)
+    
+    assert response.status == 401
+    data = json.loads(response.body)
+    assert data["error"]["code"] == "UNAUTHORIZED"

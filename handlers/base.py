@@ -2,7 +2,7 @@ from aiogram import Router
 import aiogram
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
-from utils.texts import MESSAGES
+from utils.texts import MESSAGES, DB_ERROR_MESSAGE
 
 router = Router()
 
@@ -30,7 +30,7 @@ async def process_confirm_delete_account(callback: aiogram.types.CallbackQuery):
         else:
             await callback.message.edit_text("Не удалось найти ваш аккаунт для удаления.")
     except DatabaseError:
-         await callback.message.edit_text("Произошла ошибка при удалении аккаунта. Попробуйте позже.")
+         await callback.message.edit_text(DB_ERROR_MESSAGE)
 
 @router.callback_query(lambda c: c.data == "cancel_delete_account")
 async def process_cancel_delete_account(callback: aiogram.types.CallbackQuery):
