@@ -16,3 +16,11 @@ class ItemCondition(str, Enum):
 class SellSpeed(str, Enum):
     FAST = "fast"
     OPTIMAL = "optimal"
+
+class ItemStatus(str, Enum):
+    DRAFT = "draft"
+    PENDING_MODERATION = "pending_moderation"
+    ACTIVE = "active"
+    REJECTED = "rejected"
+    ARCHIVED = "archived"
+    UNKNOWN = "unknown"

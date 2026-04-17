@@ -231,7 +231,7 @@ async def process_publish_callback(callback: CallbackQuery):
         avito_id = await avito_client.create_listing(item)
         
         await update_item_avito_id(item_id, callback.from_user.id, avito_id)
-        await msg.edit_text(f"✅ Ура! Объявление успешно опубликовано на Авито (avito_item_id: {avito_id})!\nТеперь вы можете отслеживать статистику просмотров в разделе /my_items.")
+        await msg.edit_text(f"✅ Ура! Объявление успешно отправлено на Авито и сейчас находится на модерации (avito_item_id: {avito_id})!\nЕго статус можно отслеживать в разделе /my_items.")
         
     except AvitoAPIError as e:
         logger.error(f"Avito publish error for user {callback.from_user.id}: {e}")

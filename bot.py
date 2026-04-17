@@ -25,6 +25,9 @@ async def main():
     dp.include_router(reports.router)
 
     from services.avito_client import avito_client
+    from scripts.migrate_statuses import migrate_db
+    
+    migrate_db()
 
     # Пропускаем накопившиеся апдейты и запускаем polling
     await bot.delete_webhook(drop_pending_updates=True)
