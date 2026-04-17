@@ -1,11 +1,15 @@
 import sqlite3
 from utils.logger import setup_logger
 from utils.constants import ItemStatus
+from config import config
 
 logger = setup_logger(__name__)
 
 def migrate_db():
-    db_path = "avito_bot.db"
+    db_url = config.DATABASE_URL
+    # parse sqlite+aiosqlite:///avito_bot.db
+    db_path = db_url.split("///")[-1]
+    
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()

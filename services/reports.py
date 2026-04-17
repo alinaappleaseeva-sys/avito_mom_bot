@@ -4,6 +4,9 @@ from database.crud import get_user_items, update_item_sync
 from services.avito_client import avito_client, AvitoAPIError
 from config import config
 
+FRESH_ITEM_DAYS_THRESHOLD = 2
+HIGH_VIEWS_THRESHOLD = 20
+
 logger = logging.getLogger(__name__)
 
 async def generate_weekly_report(telegram_id: int) -> str | None:
@@ -28,8 +31,8 @@ async def generate_weekly_report(telegram_id: int) -> str | None:
             
             try:
                 stats = await avito_client.get_listing_stats(item.avito_item_id)
-                views = stats.get("views", 0)
-                contacts = stats.get("contacts", 0)
+                views = stats.views
+                contacts = stats.contacts
                 
                 # Обновляем кэш в БД
                 await update_item_sync(item.id, telegram_id, views=views, contacts=contacts)
@@ -38,7 +41,8 @@ async def generate_weekly_report(telegram_id: int) -> str | None:
                     data_source = "🟢 Актуально с Авито"
             except AvitoAPIError as e:
                 logger.warning(f"Failed to fetch stats for report (Item: {item.id}): {e}")
-                data_source = "🟡 Кэш"
+                if config.AVITO_API_MODE != "mock":
+                    data_source = "🟡 Кэш"
         
         lines.append(f"📦 <b>{item.title}</b> ({item.price} руб.)")
         lines.append(f"👁 Просмотры: {views} | 💬 Контакты: {contacts} <i>{data_source}</i>")
@@ -50,11 +54,11 @@ async def generate_weekly_report(telegram_id: int) -> str | None:
         
         days_active = (now - created_at).days
         
-        if days_active < 2 and views == 0:
+        if days_active < FRESH_ITEM_DAYS_THRESHOLD and views == 0:
             lines.append("💡 <i>Рекомендация:</i> Объявление совсем свежее, статистика еще не собралась. Подождем пару дней.")
         elif views == 0:
             lines.append("💡 <i>Рекомендация:</i> Совсем нет просмотров. Возможно, выбрана непопулярная категория, стоит обновить основное фото или предложить вещь бесплатно.")
-        elif views > 20 and contacts == 0:
+        elif views > HIGH_VIEWS_THRESHOLD and contacts == 0:
             lines.append("💡 <i>Рекомендация:</i> Просмотры есть, обращений нет. Попробуйте обновить фотографии или немного снизить цену.")
         elif contacts > 0:
             lines.append("💡 <i>Рекомендация:</i> 🔥 Идут запросы! Не забывайте отвечать на сообщения (или звонки).")

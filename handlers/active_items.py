@@ -59,8 +59,8 @@ async def show_my_items(message: Message):
                 if new_domain_status == ItemStatus.ACTIVE.value:
                     try:
                         stats = await avito_client.get_listing_stats(item.avito_item_id)
-                        views = stats['views']
-                        contacts = stats['contacts']
+                        views = stats.views
+                        contacts = stats.contacts
                     except AvitoAPIError:
                         pass # Ignore stats error
                 
@@ -133,8 +133,8 @@ async def process_refresh_item_callback(callback: CallbackQuery):
         
         if new_domain_status == ItemStatus.ACTIVE.value:
             stats = await avito_client.get_listing_stats(item.avito_item_id)
-            views = stats['views']
-            contacts = stats['contacts']
+            views = stats.views
+            contacts = stats.contacts
 
         status_enum = ItemStatus(new_domain_status)
         await update_item_sync(item.id, callback.from_user.id, status_enum, views=views, contacts=contacts)

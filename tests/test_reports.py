@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
 from services.reports import generate_weekly_report
 from utils.constants import ItemStatus
+from services.avito_client import AvitoListingStats
 
 @pytest.fixture
 def mock_item():
@@ -31,7 +32,7 @@ async def test_generate_weekly_report_mock_mode(mock_item):
          patch("services.reports.update_item_sync") as mock_sync:
         
         mock_config.AVITO_API_MODE = "mock"
-        mock_client.get_listing_stats.return_value = {"views": 100, "contacts": 5}
+        mock_client.get_listing_stats.return_value = AvitoListingStats(views=100, contacts=5)
         
         report = await generate_weekly_report(123)
         
@@ -75,3 +76,19 @@ async def test_generate_weekly_report_fresh_item_zero_views(mock_item):
         
         assert "🟢 Актуально с Авито" in report
         assert "💡 <i>Рекомендация:</i> Объявление совсем свежее, статистика еще не собралась." in report
+
+@pytest.mark.asyncio
+async def test_generate_weekly_report_older_item_zero_views(mock_item):
+    mock_item.created_at = datetime.now(timezone.utc) - timedelta(days=10) # definitely older
+    
+    with patch("services.reports.get_user_items", return_value=[mock_item]), \
+         patch("services.reports.config") as mock_config, \
+         patch("services.reports.avito_client") as mock_client, \
+         patch("services.reports.update_item_sync"):
+        
+        mock_config.AVITO_API_MODE = "production"
+        mock_client.get_listing_stats.return_value = AvitoListingStats(views=0, contacts=0)
+        
+        report = await generate_weekly_report(123)
+        
+        assert "💡 <i>Рекомендация:</i> Совсем нет просмотров. Возможно, выбрана непопулярная категория" in report
