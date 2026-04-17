@@ -4,7 +4,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN, CATEGORIES_REVERSE, CONDITIONS_REVERSE, SPEEDS_REVERSE
+from utils.texts import MESSAGES, CATEGORIES, CONDITIONS, SPEEDS, CANCEL_BTN, CATEGORIES_REVERSE, CONDITIONS_REVERSE, SPEEDS_REVERSE, DB_ERROR_MESSAGE
 from utils.constants import ItemCategory, ItemCondition, SellSpeed
 from services.price_estimator import estimate_price_and_time
 from services.text_generator import generate_sales_text
@@ -196,7 +196,7 @@ async def process_speed(message: Message, state: FSMContext):
         )
     except DatabaseError:
         await msg.delete()
-        await message.answer("Сейчас есть техническая проблема с сохранением объявления, попробуйте позже.", reply_markup=ReplyKeyboardRemove())
+        await message.answer(DB_ERROR_MESSAGE, reply_markup=ReplyKeyboardRemove())
         return
     
     # Формируем финальный результат
@@ -247,7 +247,7 @@ async def process_publish_callback(callback: CallbackQuery):
         logger.error(f"Avito publish error for user {callback.from_user.id}: {e}")
         await msg.edit_text(f"❌ Похоже, вашему профилю недоступна прямая публикация через API, либо произошла ошибка Авито.\nПодробности: {e}\n\nПожалуйста, выставите объявление вручную и прикрепите ссылку в меню /my_items !")
     except DatabaseError:
-        await msg.edit_text("Объявление опубликовано на Авито, но произошла ошибка сохранения его ID в нашу базу данных.")
+        await msg.edit_text(f"Объявление опубликовано на Авито, но: {DB_ERROR_MESSAGE}")
         
 @router.callback_query(F.data.startswith("draft_"))
 async def process_draft_callback(callback: CallbackQuery):

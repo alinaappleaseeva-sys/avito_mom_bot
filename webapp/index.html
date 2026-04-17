@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Avito Mom Bot Mini App</title>
+    <!-- Подключение библиотеки Telegram Web App -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 20px;
+            text-align: center;
+        }
+        .container { margin-top: 50px; }
+        .spinner {
+            border: 4px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-top: 4px solid var(--tg-theme-button-color, #3390ec);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .error { color: var(--tg-theme-destructive-text-color, #e53935); }
+        .hidden { display: none; }
+        button {
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Стейт загрузки -->
+        <div id="loadingState">
+            <div class="spinner"></div>
+            <h2 id="loadingText">Авторизуем вас...</h2>
+            <p style="opacity: 0.7; font-size: 14px;">Подключаемся к базе данных</p>
+        </div>
+
+        <!-- Стейт ошибки -->
+        <div id="errorState" class="hidden">
+            <h2>Произошла ошибка</h2>
+            <p id="errorDescription" class="error"></p>
+            <button onclick="authWithTelegram()">Попробовать снова</button>
+        </div>
+
+        <!-- Стейт успеха -->
+        <div id="successState" class="hidden">
+            <h2>✅ Вы авторизованы!</h2>
+            <p>Добро пожаловать, <span id="userName"></span>.</p>
+            <p style="opacity: 0.6; font-size: 12px;">Роль: <span id="userRole"></span></p>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        async function authWithTelegram() {
+            // Переключаем UI в состояние загрузки
+            document.getElementById('errorState').classList.add('hidden');
+            document.getElementById('successState').classList.add('hidden');
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('loadingText').innerText = "Авторизуем вас...";
+
+            // Таймаут контроллер для предотвращения вечного зависания
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут на фронте
+
+            try {
+                // Если мы тестируем локально вне Telegram, tg.initData будет пустым.
+                const initData = tg.initData || "mock_local_dev_string";
+                
+                // ВАЖНО: Роут вашего бекенда
+                const response = await fetch('/auth/telegram', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ init_data: initData }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                // Обработка статус-кодов как запрошено в задаче
+                if (response.status === 200) {
+                    const data = await response.json();
+                    
+                    // Сохраняем JWT для будущих запросов
+                    localStorage.setItem('jwtToken', data.token);
+                    
+                    document.getElementById('loadingState').classList.add('hidden');
+                    document.getElementById('successState').classList.remove('hidden');
+                    document.getElementById('userName').innerText = data.user.first_name || data.user.username;
+                    document.getElementById('userRole').innerText = data.user.role;
+                } 
+                else if (response.status === 401 || response.status === 422) {
+                    throw new Error("Ошибка верификации (401/422). Пожалуйста, перезапустите Mini App.");
+                } 
+                else if (response.status === 503) {
+                    throw new Error("Сервис временно недоступен, база не отвечает. Попробуйте зайти позже.");
+                } 
+                else {
+                    throw new Error(`Внутренняя ошибка сервера. Код: ${response.status}`);
+                }
+            } catch (err) {
+                clearTimeout(timeoutId);
+                let message = err.message;
+                
+                // Обработка локального таймаута fetch
+                if (err.name === 'AbortError') {
+                    message = "Превышено время ожидания сервера. База не отвечает, попробуйте позже.";
+                }
+
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorDescription').innerText = message;
+            }
+        }
+
+        // Запуск при открытии Mini App
+        authWithTelegram();
+    </script>
+</body>
+</html>

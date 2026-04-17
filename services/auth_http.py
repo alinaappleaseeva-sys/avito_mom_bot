@@ -3,6 +3,9 @@ import json
 from config import config
 from database.database import async_session
 from database.crud import get_or_create_user_from_telegram
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+from database.errors import DatabaseError
+import asyncio
 from utils.telegram_init_data import validate_telegram_init_data, InvalidInitDataError
 from utils.jwt_tokens import create_access_token, decode_access_token
 from utils.logger import setup_logger
@@ -36,7 +39,6 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
     first_name = tg_user_data.get("first_name")
     last_name = tg_user_data.get("last_name")
     
-    try:
         async with async_session() as session:
             user = await get_or_create_user_from_telegram(
                 session=session,
@@ -46,9 +48,7 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
                 last_name=last_name,
                 is_admin=(telegram_id == config.TELEGRAM_ADMIN_ID)
             )
-            # Сессия закрывается тут, но объект user остаётся для извлечения данных
             
-            # Генерация JWT
             token = create_access_token(
                 user_id=user.id,
                 telegram_id=user.telegram_id,
@@ -66,8 +66,11 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
                     "role": user.role
                 }
             })
+    except (SQLAlchemyError, OperationalError, DatabaseError, asyncio.TimeoutError) as e:
+        logger.error(f"Database unavailable during auth: {e}")
+        return web.json_response({"error": "Service Unavailable", "details": "DB unavailable or overloaded. Try again later."}, status=503)
     except Exception as e:
-        logger.error(f"Error during user authorization database step: {e}")
+        logger.exception(f"Unexpected error during user authorization step: {e}")
         return web.json_response({"error": "Internal Server Error"}, status=500)
 
 @web.middleware

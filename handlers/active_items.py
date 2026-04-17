@@ -8,6 +8,7 @@ from database.crud import get_user_items, update_item_url, delete_item, update_i
 from database.errors import DatabaseError
 from services.avito_client import avito_client, AvitoAPIError
 from utils.constants import ItemStatus
+from utils.texts import DB_ERROR_MESSAGE
 from services.avito_mapper import map_avito_status_to_domain
 from datetime import datetime, timezone
 
@@ -22,7 +23,7 @@ async def show_my_items(message: Message):
     try:
         items = await get_user_items(message.from_user.id)
     except DatabaseError:
-        await message.answer("Сейчас есть техническая проблема, попробуйте позже.")
+        await message.answer(DB_ERROR_MESSAGE)
         return
         
     if not items:
@@ -184,7 +185,7 @@ async def process_url_input(message: Message, state: FSMContext):
         else:
             await message.answer("Произошла ошибка при сохранении ссылки.")
     except DatabaseError:
-        await message.answer("Сейчас есть техническая проблема, попробуйте позже.")
+        await message.answer(DB_ERROR_MESSAGE)
         
     await state.clear()
 
@@ -199,4 +200,4 @@ async def process_delete_item_callback(callback: CallbackQuery):
         else:
             await callback.answer("Не удалось удалить вещь.", show_alert=True)
     except DatabaseError:
-        await callback.answer("Сейчас есть техническая проблема, попробуйте позже.", show_alert=True)
+        await callback.answer(DB_ERROR_MESSAGE, show_alert=True)
