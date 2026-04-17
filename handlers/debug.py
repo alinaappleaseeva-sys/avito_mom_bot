@@ -5,18 +5,13 @@ from aiogram.types import Message
 from config import config
 from database.models import Item
 from services.avito_client import avito_client, AvitoAPIError
-from utils.logger import setup_logger
+from utils.filters import IsAdminFilter
 
 logger = setup_logger(__name__)
 router = Router()
 
-def is_admin(message: Message) -> bool:
-    return message.from_user.id == config.TELEGRAM_ADMIN_ID
-
-@router.message(Command("debug_avito_ping"))
+@router.message(Command("debug_avito_ping"), IsAdminFilter())
 async def debug_ping(message: Message):
-    if not is_admin(message):
-        return
     
     await message.answer("🔧 Пингую Avito API (получение токена)...")
     try:
@@ -28,10 +23,8 @@ async def debug_ping(message: Message):
     except AvitoAPIError as e:
         await message.answer(f"❌ Ошибка ping: {e}")
 
-@router.message(Command("debug_avito_test_listing"))
+@router.message(Command("debug_avito_test_listing"), IsAdminFilter())
 async def debug_test_listing(message: Message):
-    if not is_admin(message):
-        return
         
     await message.answer(f"🔧 Начинаю тестовую публикацию в режиме {config.AVITO_API_MODE}...")
     

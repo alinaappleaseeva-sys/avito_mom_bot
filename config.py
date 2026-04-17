@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     AVITO_CLIENT_SECRET: str = ""
     AVITO_USER_ID: str = ""
     TELEGRAM_ADMIN_ID: int = 0
+    
+    # WebApp Auth
+    JWT_SECRET: str = "change_me_in_production"
+    JWT_ALGORITHM: str = "HS256"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
