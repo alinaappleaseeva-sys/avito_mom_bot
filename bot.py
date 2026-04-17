@@ -2,7 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from config import config
-from handlers import base, add_item, active_items, reports, errors
+from handlers import base, add_item, active_items, reports, errors, debug
 from utils.logger import setup_logger
 
 # Инициализация логгера
@@ -23,6 +23,7 @@ async def main():
     dp.include_router(add_item.router)
     dp.include_router(active_items.router)
     dp.include_router(reports.router)
+    dp.include_router(debug.router)
 
     from services.avito_client import avito_client
     from scripts.migrate_statuses import migrate_db
