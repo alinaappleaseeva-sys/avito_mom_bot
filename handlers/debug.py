@@ -20,11 +20,13 @@ async def debug_ping(message: Message):
     
     await message.answer("🔧 Пингую Avito API (получение токена)...")
     try:
-        # accessing private method for debug intent
-        token = await avito_client._get_access_token()
-        await message.answer(f"✅ Токен успешно получен! Режим: {config.AVITO_API_MODE}")
+        success = await avito_client.ping()
+        if success:
+            await message.answer(f"✅ Токен успешно получен (ping OK)! Режим: {config.AVITO_API_MODE}")
+        else:
+            await message.answer(f"❌ Ошибка ping (auth failed).")
     except AvitoAPIError as e:
-        await message.answer(f"❌ Ошибка Auth: {e}")
+        await message.answer(f"❌ Ошибка ping: {e}")
 
 @router.message(Command("debug_avito_test_listing"))
 async def debug_test_listing(message: Message):
@@ -33,6 +35,8 @@ async def debug_test_listing(message: Message):
         
     await message.answer(f"🔧 Начинаю тестовую публикацию в режиме {config.AVITO_API_MODE}...")
     
+    # Required fields explicitly provided per current Avito Mapper rules.
+    # If the mapper changes to require things like 'city' or 'condition', add them here!
     dummy_item = Item(
         telegram_id=message.from_user.id,
         category="other",

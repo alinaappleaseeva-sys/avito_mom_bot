@@ -56,6 +56,16 @@ class AvitoClient:
         if self.session:
             await self.session.close()
 
+    async def ping(self) -> bool:
+        """
+        Публичный метод для проверки работоспособности авторизации (доступа к API).
+        """
+        try:
+            token = await self._get_access_token()
+            return bool(token)
+        except AvitoAPIError:
+            return False
+
     async def _get_access_token(self) -> str:
         """
         Получение временного токена (OAuth2 client_credentials).
@@ -189,6 +199,10 @@ class AvitoClient:
         """
         Пытается снять/закрыть объявление (для тестов в песочнице).
         В случае ошибки API логирует ответ, но не падает.
+        
+        ВНИМАНИЕ: Текущий endpoint (/items/{id}/close по POST/PUT) — это
+        спекулятивная гипотеза. Обязательно сверьтесь со свежей документацией
+        Avito API перед тем, как полагаться на эту функцию в бою.
         """
         if self.api_mode in ["mock", "sandbox"] and "mock" in str(avito_item_id):
             return True

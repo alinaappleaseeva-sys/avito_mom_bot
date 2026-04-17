@@ -34,6 +34,9 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Bot started!")
     
+    if config.TELEGRAM_ADMIN_ID == 0:
+        logger.warning("Admin commands disabled: TELEGRAM_ADMIN_ID not set in config.")
+    
     await avito_client.start()
     try:
         await dp.start_polling(bot)
