@@ -36,6 +36,17 @@ class AvitoClient:
         self._token_expires_at: float = 0.0
         self.session: Optional[aiohttp.ClientSession] = None
 
+    def _redact(self, text: str) -> str:
+        """Редактирует строку, маскируя конфиденциальные данные (токены, секреты)."""
+        if not text:
+            return text
+        text_str = str(text)
+        if self.client_secret:
+            text_str = text_str.replace(self.client_secret, "[REDACTED]")
+        if self._access_token:
+            text_str = text_str.replace(self._access_token, "[REDACTED]")
+        return text_str
+
     async def start(self) -> None:
         timeout = aiohttp.ClientTimeout(total=15)
         self.session = aiohttp.ClientSession(timeout=timeout)
@@ -44,6 +55,16 @@ class AvitoClient:
     async def close(self) -> None:
         if self.session:
             await self.session.close()
+
+    async def ping(self) -> bool:
+        """
+        Публичный метод для проверки работоспособности авторизации (доступа к API).
+        """
+        try:
+            token = await self._get_access_token()
+            return bool(token)
+        except AvitoAPIError:
+            return False
 
     async def _get_access_token(self) -> str:
         """
@@ -77,22 +98,22 @@ class AvitoClient:
             ) as response:
                 if response.status >= 500:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Auth 5xx Server Error body: {text_resp}")
-                    logger.error(f"Avito Auth 5xx Server Error (HTTP {response.status}).")
+                    logger.debug(self._redact(f"Avito Auth 5xx Server Error body: {text_resp}"))
+                    logger.error(self._redact(f"Avito Auth 5xx Server Error (HTTP {response.status})."))
                     raise AvitoAPIError("Avito server side error (5xx).")
 
                 try:
                     res_data = await response.json()
                 except ValueError:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Auth Invalid JSON body: {text_resp}")
+                    logger.debug(self._redact(f"Avito Auth Invalid JSON body: {text_resp}"))
                     logger.error("Avito Auth response was not a valid JSON.")
                     raise AvitoAPIError("Avito Auth response was not a valid JSON.")
                 
                 if response.status >= 400:
-                    logger.debug(f"Avito Auth 4xx Error body: {res_data}")
-                    logger.warning(f"Avito Auth failed with HTTP {response.status}.")
-                    raise AvitoAPIError(f"Auth failed: {res_data.get('error', 'unknown')} - {res_data.get('error_description', 'No description')}")
+                    logger.debug(self._redact(f"Avito Auth 4xx Error body: {res_data}"))
+                    logger.warning(self._redact(f"Avito Auth failed with HTTP {response.status}."))
+                    raise AvitoAPIError(self._redact(f"Auth failed: {res_data.get('error', 'unknown')} - {res_data.get('error_description', 'No description')}"))
                 
                 self._access_token = res_data.get("access_token")
                 expires_in = int(res_data.get("expires_in", 3600))
@@ -103,8 +124,8 @@ class AvitoClient:
                     
                 return self._access_token
         except aiohttp.ClientError as e:
-            logger.error(f"Avito Auth Network error: {e}")
-            raise AvitoAPIError(f"Network error during authorization: {e}")
+            logger.error(self._redact(f"Avito Auth Network error: {e}"))
+            raise AvitoAPIError(self._redact(f"Network error during authorization: {e}"))
 
     async def create_listing(self, item: Item) -> str:
         """
@@ -136,42 +157,79 @@ class AvitoClient:
             async with self.session.post(url, json=payload, headers=headers) as response:
                 if response.status >= 500:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Create Item 5xx Error body: {text_resp}")
-                    logger.error(f"Avito Create Item 5xx Error (HTTP {response.status}).")
+                    logger.debug(self._redact(f"Avito Create Item 5xx Error body: {text_resp}"))
+                    logger.error(self._redact(f"Avito Create Item 5xx Error (HTTP {response.status})."))
                     raise AvitoAPIError("Avito server side error (5xx) while creating listing.")
                     
                 try:
                     data = await response.json()
                 except ValueError:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Create Item Invalid JSON body: {text_resp}")
+                    logger.debug(self._redact(f"Avito Create Item Invalid JSON body: {text_resp}"))
                     logger.error("Avito Create Item response was not a valid JSON.")
                     raise AvitoAPIError("Avito Create Item response was not a valid JSON.")
 
                 if response.status == 400:
-                    logger.debug(f"Avito API Bad Request body: {data}")
+                    logger.debug(self._redact(f"Avito API Bad Request body: {data}"))
                     logger.warning("Avito API Bad Request (400 validation error).")
-                    raise AvitoAPIError(f"Ошибка валидации данных объявления: {data.get('error', {}).get('message', 'Unknown bad request')}")
+                    raise AvitoAPIError(self._redact(f"Ошибка валидации данных объявления: {data.get('error', {}).get('message', 'Unknown bad request')}"))
                     
                 if response.status in (401, 403):
-                    logger.debug(f"Avito API access denied body: {data}")
-                    logger.warning(f"Avito API access denied (HTTP {response.status}).")
+                    logger.debug(self._redact(f"Avito API access denied body: {data}"))
+                    logger.warning(self._redact(f"Avito API access denied (HTTP {response.status})."))
                     raise AvitoAPIError("У вашего профиля или сервисного приложения нет прав на автоматическую публикацию (403 Forbidden).")
                 
                 if response.status >= 400:
-                    logger.debug(f"Avito API creation failed body: {data}")
-                    logger.warning(f"Avito API creation failed (HTTP {response.status}).")
+                    logger.debug(self._redact(f"Avito API creation failed body: {data}"))
+                    logger.warning(self._redact(f"Avito API creation failed (HTTP {response.status})."))
                     raise AvitoAPIError("Не удалось создать объявление на Авито.")
 
                 item_id = data.get("itemId") or data.get("id")
                 if not item_id:
-                    logger.debug(f"Avito Create Item response without ID: {data}")
+                    logger.debug(self._redact(f"Avito Create Item response without ID: {data}"))
                     raise AvitoAPIError("Avito API response did not contain an item ID.")
                 return str(item_id)
                 
         except aiohttp.ClientError as e:
-            logger.error(f"Avito Create Item Network error: {e}")
-            raise AvitoAPIError(f"Сетевая ошибка при создании: {e}")
+            logger.error(self._redact(f"Avito Create Item Network error: {e}"))
+            raise AvitoAPIError(self._redact(f"Сетевая ошибка при создании: {e}"))
+
+
+    async def archive_listing(self, avito_item_id: str) -> bool:
+        """
+        Пытается снять/закрыть объявление (для тестов в песочнице).
+        В случае ошибки API логирует ответ, но не падает.
+        
+        ВНИМАНИЕ: Текущий endpoint (/items/{id}/close по POST/PUT) — это
+        спекулятивная гипотеза. Обязательно сверьтесь со свежей документацией
+        Avito API перед тем, как полагаться на эту функцию в бою.
+        """
+        if self.api_mode in ["mock", "sandbox"] and "mock" in str(avito_item_id):
+            return True
+            
+        if not self.session:
+            raise RuntimeError("AvitoClient session is not initialized")
+            
+        token = await self._get_access_token()
+        # Предполагаемый REST эндпоинт для снятия/закрытия
+        url = f"https://api.avito.ru/core/v1/accounts/{self.user_id}/items/{avito_item_id}/close"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            # Некоторые версии API хотят POST, некоторые PUT. Учитывая отсутствие доков пробуем POST
+            async with self.session.post(url, json={"status": "closed"}, headers=headers) as response:
+                text_resp = await response.text()
+                logger.debug(self._redact(f"Avito API archive_listing response: {text_resp}"))
+                if response.status >= 400:
+                    logger.warning(self._redact(f"Failed to archive item {avito_item_id}. HTTP {response.status}. Body: {text_resp}"))
+                    return False
+                return True
+        except aiohttp.ClientError as e:
+            logger.error(self._redact(f"Avito API archive_listing network error: {e}"))
+            return False
 
     async def get_listing_stats(self, avito_item_id: str) -> AvitoListingStats:
         """
@@ -202,8 +260,8 @@ class AvitoClient:
         try:
             item_id_num = int(avito_item_id)
         except ValueError:
-            logger.error(f"Avito item id '{avito_item_id}' must be numeric for stats.")
-            raise AvitoAPIError(f"Invalid non-numeric Avito item ID: {avito_item_id}")
+            logger.error(self._redact(f"Avito item id '{avito_item_id}' must be numeric for stats."))
+            raise AvitoAPIError(self._redact(f"Invalid non-numeric Avito item ID: {avito_item_id}"))
             
         payload = {
             "dateFrom": start_date.strftime("%Y-%m-%d"),
@@ -216,22 +274,22 @@ class AvitoClient:
             async with self.session.post(url, json=payload, headers=headers) as response:
                 if response.status >= 500:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Stats 5xx Error body: {text_resp}")
-                    logger.error(f"Avito Stats 5xx Error (HTTP {response.status}).")
+                    logger.debug(self._redact(f"Avito Stats 5xx Error body: {text_resp}"))
+                    logger.error(self._redact(f"Avito Stats 5xx Error (HTTP {response.status})."))
                     raise AvitoAPIError("Avito API 5xx error while getting stats.")
                 
                 try:
                     data = await response.json()
                 except ValueError:
                     text_resp = await response.text()
-                    logger.debug(f"Avito Stats Invalid JSON body: {text_resp}")
+                    logger.debug(self._redact(f"Avito Stats Invalid JSON body: {text_resp}"))
                     logger.error("Avito Stats Invalid JSON response.")
                     raise AvitoAPIError("Avito API returned invalid JSON for stats.")
                     
                 if response.status >= 400:
-                    logger.debug(f"Failed to get stats body: {data}")
-                    logger.warning(f"Failed to get stats (HTTP {response.status}).")
-                    raise AvitoAPIError(f"Avito API error {response.status} while getting stats.")
+                    logger.debug(self._redact(f"Failed to get stats body: {data}"))
+                    logger.warning(self._redact(f"Failed to get stats (HTTP {response.status})."))
+                    raise AvitoAPIError(self._redact(f"Avito API error {response.status} while getting stats."))
                 
                 # Extracting using standard Avito schema
                 items_data = data.get("result", {}).get("items", [])
@@ -244,8 +302,8 @@ class AvitoClient:
                 
                 return AvitoListingStats(views=total_views, contacts=total_contacts)
         except aiohttp.ClientError as e:
-            logger.error(f"Avito Stats network error: {e}")
-            raise AvitoAPIError(f"Network error while getting stats: {e}")
+            logger.error(self._redact(f"Avito Stats network error: {e}"))
+            raise AvitoAPIError(self._redact(f"Network error while getting stats: {e}"))
 
     async def get_item_info(self, avito_item_id: str) -> AvitoItemInfo:
         """
@@ -276,7 +334,7 @@ class AvitoClient:
             async with self.session.get(url, headers=headers) as response:
                 if response.status >= 500:
                     text_resp = await response.text()
-                    logger.error(f"Avito get_item_info 5xx Error (HTTP {response.status}): {text_resp}")
+                    logger.error(self._redact(f"Avito get_item_info 5xx Error (HTTP {response.status}): {text_resp}"))
                     raise AvitoAPIError("Avito API 5xx error while getting item info.")
                 
                 try:
@@ -286,17 +344,17 @@ class AvitoClient:
                     raise AvitoAPIError("Avito API returned invalid JSON for item info.")
                     
                 if response.status >= 400:
-                    logger.warning(f"Failed to get item info (HTTP {response.status}): {data}")
-                    raise AvitoAPIError(f"Avito API error {response.status} while getting item info.")
+                    logger.warning(self._redact(f"Failed to get item info (HTTP {response.status}): {data}"))
+                    raise AvitoAPIError(self._redact(f"Avito API error {response.status} while getting item info."))
                 
                 status = data.get("status", "unknown")
                 reject_reason = data.get("reject_reason")
                 if "status" not in data:
-                    logger.warning(f"Avito get_item_info response missing 'status' key! Raw data: {data}")
+                    logger.warning(self._redact(f"Avito get_item_info response missing 'status' key! Raw data: {data}"))
                     
                 return AvitoItemInfo(status=status, reject_reason=reject_reason)
         except aiohttp.ClientError as e:
-            logger.error(f"Avito get_item_info network error: {e}")
-            raise AvitoAPIError(f"Network error while getting item info: {e}")
+            logger.error(self._redact(f"Avito get_item_info network error: {e}"))
+            raise AvitoAPIError(self._redact(f"Network error while getting item info: {e}"))
 
 avito_client = AvitoClient()

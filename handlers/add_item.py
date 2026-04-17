@@ -52,6 +52,11 @@ async def cancel_handler(message: Message, state: FSMContext):
 @router.message(F.text.lower() == "добавить вещь")
 async def start_add_item(message: Message, state: FSMContext):
     """Начало сценария добавления вещи."""
+    from config import config
+    if config.AVITO_API_MODE == "sandbox":
+        await message.answer("Бот находится на техобслуживании, создание объявлений временно приостановлено.")
+        return
+        
     await state.set_state(ItemForm.category)
     await message.answer(
         MESSAGES["ask_category"],
@@ -217,6 +222,11 @@ async def process_speed(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("publish_"))
 async def process_publish_callback(callback: CallbackQuery):
+    from config import config
+    if config.AVITO_API_MODE == "sandbox":
+        await callback.answer("Бот находится на техобслуживании, создание объявлений временно приостановлено.", show_alert=True)
+        return
+        
     item_id = int(callback.data.split("_")[1])
     
     try:
