@@ -23,3 +23,4 @@ class ItemStatus(str, Enum):
     ACTIVE = "active"
     REJECTED = "rejected"
     ARCHIVED = "archived"
+    UNKNOWN = "unknown"

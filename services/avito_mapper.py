@@ -78,5 +78,5 @@ def map_avito_status_to_domain(avito_status: str) -> str:
     if status_enum:
         return status_enum.value
         
-    logger.warning(f"Неизвестный статус от Avito API: '{avito_status}'. Используем эвристическую оценку (Draft).")
-    return ItemStatus.DRAFT.value
+    logger.warning(f"Неизвестный статус от Avito API: '{avito_status}'. Используем эвристическую оценку (Unknown).")
+    return ItemStatus.UNKNOWN.value

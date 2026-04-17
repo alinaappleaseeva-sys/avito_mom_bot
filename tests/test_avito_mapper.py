@@ -28,5 +28,5 @@ def test_map_avito_status_to_domain():
     assert map_avito_status_to_domain(" Active ") == ItemStatus.ACTIVE.value
     assert map_avito_status_to_domain("REJECTED") == ItemStatus.REJECTED.value
     
-    # Check arbitrary random strings should fallback to Draft
-    assert map_avito_status_to_domain("some_random_status") == ItemStatus.DRAFT.value
+    # Check arbitrary random strings should fallback to UNKNOWN
+    assert map_avito_status_to_domain("some_random_status") == ItemStatus.UNKNOWN.value

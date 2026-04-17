@@ -1,6 +1,7 @@
 import logging
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
+from sqlalchemy.sql import func
 from sqlalchemy.exc import SQLAlchemyError
 from database.database import async_session
 from database.models import User, Item
@@ -99,16 +100,34 @@ async def update_item_avito_id(item_id: int, user_id: int, avito_item_id: str):
         logger.error(f"DB Error updating avito_item_id for item {item_id}: {e}")
         raise DatabaseError(f"Failed to update Avito Item ID: {e}")
 
-async def update_item_status(item_id: int, user_id: int, status: str):
+async def update_item_status(item_id: int, user_id: int, status: ItemStatus):
     try:
         async with async_session() as session:
-            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(status=status)
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(status=status.value)
             result = await session.execute(stmt)
             await session.commit()
             return result.rowcount > 0
     except SQLAlchemyError as e:
         logger.error(f"DB Error updating status for item {item_id}: {e}")
         raise DatabaseError(f"Failed to update item status: {e}")
+
+async def update_item_sync(item_id: int, user_id: int, status: ItemStatus = None, views: int = None, contacts: int = None):
+    try:
+        async with async_session() as session:
+            values = {"last_synced_at": func.now()}
+            if status is not None:
+                values["status"] = status.value
+            if views is not None:
+                values["views"] = views
+            if contacts is not None:
+                values["contacts"] = contacts
+            stmt = update(Item).where(Item.id == item_id, Item.user_id == user_id).values(**values)
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount > 0
+    except SQLAlchemyError as e:
+        logger.error(f"DB Error updating sync info for item {item_id}: {e}")
+        raise DatabaseError(f"Failed to update item sync info: {e}")
 
 async def delete_user_account(telegram_id: int):
     try:

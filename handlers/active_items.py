@@ -4,11 +4,12 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
-from database.crud import get_user_items, update_item_url, delete_item, update_item_status
+from database.crud import get_user_items, update_item_url, delete_item, update_item_status, update_item_sync, get_item_by_id
 from database.errors import DatabaseError
 from services.avito_client import avito_client, AvitoAPIError
 from utils.constants import ItemStatus
 from services.avito_mapper import map_avito_status_to_domain
+from datetime import datetime, timezone
 
 router = Router()
 
@@ -30,72 +31,120 @@ async def show_my_items(message: Message):
         
     await message.answer("Ваши вещи:")
     for item in items:
-        # Fallback for old data DB values without doing full migration
         db_status = item.status
-        if db_status == "pending": db_status = ItemStatus.DRAFT.value
-        if db_status == "on_review": db_status = ItemStatus.PENDING_MODERATION.value
-
-        # Fetch new status if Avito Item ID is present
         reject_reason = None
+        views = item.views or 0
+        contacts = item.contacts or 0
+
+        # Rate Limiting Logic (5 minutes cache)
+        needs_sync = False
         if item.avito_item_id:
+            if not item.last_synced_at:
+                needs_sync = True
+            else:
+                now = datetime.now(timezone.utc)
+                last_synced = item.last_synced_at
+                if last_synced.tzinfo is None:
+                    last_synced = last_synced.replace(tzinfo=timezone.utc)
+                diff_seconds = (now - last_synced).total_seconds()
+                if diff_seconds > 300: # 5 minutes
+                    needs_sync = True
+
+        if needs_sync:
             try:
                 info = await avito_client.get_item_info(item.avito_item_id)
-                avito_status = info.get("status")
-                if avito_status:
-                    new_domain_status = map_avito_status_to_domain(avito_status)
-                    reject_reason = info.get("reject_reason")
-                    if new_domain_status != db_status:
-                        await update_item_status(item.id, message.from_user.id, new_domain_status)
-                        db_status = new_domain_status
+                new_domain_status = map_avito_status_to_domain(info.status)
+                reject_reason = info.reject_reason
+                
+                if new_domain_status == ItemStatus.ACTIVE.value:
+                    try:
+                        stats = await avito_client.get_listing_stats(item.avito_item_id)
+                        views = stats['views']
+                        contacts = stats['contacts']
+                    except AvitoAPIError:
+                        pass # Ignore stats error
+                
+                status_enum = ItemStatus(new_domain_status)
+                await update_item_sync(item.id, message.from_user.id, status_enum, views=views, contacts=contacts)
+                db_status = new_domain_status
             except AvitoAPIError:
                 pass # Proceed with existing db_status if api fails
 
-        # Determing UI
-        if db_status == ItemStatus.DRAFT.value:
-            status_emoji = "📝"
-            status_text = "Черновик (ожидает публикации)"
-        elif db_status == ItemStatus.PENDING_MODERATION.value:
-            status_emoji = "🧐"
-            status_text = "На проверке (Авито проверяет объявление)"
-        elif db_status == ItemStatus.ACTIVE.value:
-            status_emoji = "✅"
-            status_text = "Активно (продается)"
-        elif db_status == ItemStatus.REJECTED.value:
-            status_emoji = "❌"
-            status_text = "Отклонено"
-            if reject_reason:
-                status_text += f"\nПричина: <i>{reject_reason}</i>"
-        elif db_status == ItemStatus.ARCHIVED.value:
-            status_emoji = "🗄️"
-            status_text = "В архиве"
-        else:
-            status_emoji = "❓"
-            status_text = "Неизвестно"
-
-        text = f"{status_emoji} <b>{item.title}</b>\nЦена: {item.price} руб.\nСтатус: {status_text}"
-        
-        markup = None
-        if db_status == ItemStatus.DRAFT.value:
-            markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔗 Добавить ссылку вручную", callback_data=f"add_link_{item.id}")],
-                [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
-            ])
-        else:
-            if db_status == ItemStatus.ACTIVE.value:
-                if item.avito_url:
-                    text += f"\nСсылка: {item.avito_url}"
-                if item.avito_item_id:
-                    try:
-                        stats = await avito_client.get_listing_stats(item.avito_item_id)
-                        text += f"\n👁️ Просмотров: {stats['views']} | 💬 Контактов: {stats['contacts']}"
-                    except AvitoAPIError:
-                        text += "\n👁️ Просмотров: недоступно | 💬 Контактов: недоступно (Ошибка)"
-            
-            markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")]
-            ])
-            
+        text, markup = await _build_item_message(item, db_status, reject_reason, views, contacts)
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+async def _build_item_message(item, db_status, reject_reason, views, contacts):
+    if db_status == ItemStatus.DRAFT.value:
+        status_emoji = "📝"
+        status_text = "Черновик (ожидает публикации)"
+    elif db_status == ItemStatus.PENDING_MODERATION.value:
+        status_emoji = "🧐"
+        status_text = "На проверке (Авито проверяет объявление)"
+    elif db_status == ItemStatus.ACTIVE.value:
+        status_emoji = "✅"
+        status_text = "Активно (продается)"
+    elif db_status == ItemStatus.REJECTED.value:
+        status_emoji = "❌"
+        status_text = "Отклонено"
+        if reject_reason:
+            status_text += f"\nПричина: <i>{reject_reason}</i>"
+    elif db_status == ItemStatus.ARCHIVED.value:
+        status_emoji = "🗄️"
+        status_text = "В архиве"
+    else:
+        status_emoji = "❓"
+        status_text = "Неизвестно"
+
+    text = f"{status_emoji} <b>{item.title}</b>\nЦена: {item.price} руб.\nСтатус: {status_text}"
+    
+    markup_buttons = []
+    if db_status == ItemStatus.DRAFT.value:
+        markup_buttons.append([InlineKeyboardButton(text="🔗 Добавить ссылку вручную", callback_data=f"add_link_{item.id}")])
+    else:
+        if db_status == ItemStatus.ACTIVE.value:
+            if item.avito_url:
+                text += f"\nСсылка: {item.avito_url}"
+            text += f"\n👁️ Просмотров: {views} | 💬 Контактов: {contacts}"
+        
+        # Add refresh button for synced items
+        if item.avito_item_id:
+            markup_buttons.append([InlineKeyboardButton(text="🔄 Обновить статус", callback_data=f"refresh_item_{item.id}")])
+
+    markup_buttons.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_item_{item.id}")])
+    
+    return text, InlineKeyboardMarkup(inline_keyboard=markup_buttons)
+
+@router.callback_query(F.data.startswith("refresh_item_"))
+async def process_refresh_item_callback(callback: CallbackQuery):
+    item_id = int(callback.data.split("_")[2])
+    item = await get_item_by_id(item_id, callback.from_user.id)
+    if not item or not item.avito_item_id:
+        await callback.answer("Вещь не найдена или не привязана к Авито API.", show_alert=True)
+        return
+
+    await callback.answer("⏳ Обновляю данные с Авито...")
+    try:
+        info = await avito_client.get_item_info(item.avito_item_id)
+        new_domain_status = map_avito_status_to_domain(info.status)
+        reject_reason = info.reject_reason
+        
+        views = item.views or 0
+        contacts = item.contacts or 0
+        
+        if new_domain_status == ItemStatus.ACTIVE.value:
+            stats = await avito_client.get_listing_stats(item.avito_item_id)
+            views = stats['views']
+            contacts = stats['contacts']
+
+        status_enum = ItemStatus(new_domain_status)
+        await update_item_sync(item.id, callback.from_user.id, status_enum, views=views, contacts=contacts)
+        
+        text, markup = await _build_item_message(item, new_domain_status, reject_reason, views, contacts)
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    except AvitoAPIError as e:
+        await callback.message.answer(f"❌ Ошибка обновления: {e}")
+    except Exception as e:
+        await callback.message.answer(f"❌ Внутренняя ошибка: {e}")
 
 @router.callback_query(F.data.startswith("add_link_"))
 async def process_add_link_callback(callback: CallbackQuery, state: FSMContext):
