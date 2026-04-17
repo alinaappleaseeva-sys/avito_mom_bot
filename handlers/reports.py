@@ -9,9 +9,9 @@ router = Router()
 @router.message(Command("report"))
 @router.message(F.text.lower() == "отчет")
 async def get_report(message: Message):
-    msg = await message.answer("⏳ Собираю статистику с Авито (мок)...")
+    msg = await message.answer("⏳ Собираю свежую статистику... это может занять несколько секунд.")
     
-    report_text = await generate_weekly_report(message.fromuser.id if hasattr(message, 'fromuser') else message.from_user.id)
+    report_text = await generate_weekly_report(message.from_user.id)
     
     await msg.delete()
     if report_text:

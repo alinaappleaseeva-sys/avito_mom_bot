@@ -20,6 +20,11 @@ class AvitoItemInfo:
     status: str
     reject_reason: Optional[str] = None
 
+@dataclass
+class AvitoListingStats:
+    views: int
+    contacts: int
+
 class AvitoClient:
     def __init__(self):
         self.auth_url = "https://api.avito.ru/token/"
@@ -168,7 +173,7 @@ class AvitoClient:
             logger.error(f"Avito Create Item Network error: {e}")
             raise AvitoAPIError(f"Сетевая ошибка при создании: {e}")
 
-    async def get_listing_stats(self, avito_item_id: str) -> Dict[str, Any]:
+    async def get_listing_stats(self, avito_item_id: str) -> AvitoListingStats:
         """
         Получает сводную статистику по одному объявлению за последние 30 дней.
         Docs: https://developers.avito.ru/api-catalog
@@ -176,7 +181,7 @@ class AvitoClient:
         if self.api_mode == "mock":
             await asyncio.sleep(0.5)
             # Если передали "mock" id
-            return {"views": 15, "contacts": 2}
+            return AvitoListingStats(views=15, contacts=2)
 
         if not self.session:
             raise RuntimeError("AvitoClient session is not initialized")
@@ -231,13 +236,13 @@ class AvitoClient:
                 # Extracting using standard Avito schema
                 items_data = data.get("result", {}).get("items", [])
                 if not items_data:
-                    return {"views": 0, "contacts": 0}
+                    return AvitoListingStats(views=0, contacts=0)
                     
                 item_stats = items_data[0].get("stats", [])
                 total_views = sum(day_stat.get("views", 0) for day_stat in item_stats)
                 total_contacts = sum(day_stat.get("contacts", 0) for day_stat in item_stats)
                 
-                return {"views": total_views, "contacts": total_contacts}
+                return AvitoListingStats(views=total_views, contacts=total_contacts)
         except aiohttp.ClientError as e:
             logger.error(f"Avito Stats network error: {e}")
             raise AvitoAPIError(f"Network error while getting stats: {e}")

@@ -1,5 +1,13 @@
-import random
-from database.crud import get_user_items
+import logging
+from datetime import datetime, timezone
+from database.crud import get_user_items, update_item_sync
+from services.avito_client import avito_client, AvitoAPIError
+from config import config
+
+FRESH_ITEM_DAYS_THRESHOLD = 2
+HIGH_VIEWS_THRESHOLD = 20
+
+logger = logging.getLogger(__name__)
 
 async def generate_weekly_report(telegram_id: int) -> str | None:
     items = await get_user_items(telegram_id)
@@ -9,25 +17,53 @@ async def generate_weekly_report(telegram_id: int) -> str | None:
         return None
         
     lines = ["📊 <b>Ваш еженедельный отчет по активным вещам:</b>\n"]
+    now = datetime.now(timezone.utc)
     
     for item in active_items:
-        # Генерируем моковую статистику
-        views = random.randint(5, 100)
-        favorites = int(views * random.uniform(0.05, 0.2))
-        messages = random.randint(0, 3) if views > 30 else 0
+        views = item.views or 0
+        contacts = item.contacts or 0
+        data_source = "🔴 Нет данных"
+        
+        # Попытка получить свежие данные, если есть ID
+        if item.avito_item_id:
+            if config.AVITO_API_MODE == "mock":
+                data_source = "🟣 Режим эмуляции"
+            
+            try:
+                stats = await avito_client.get_listing_stats(item.avito_item_id)
+                views = stats.views
+                contacts = stats.contacts
+                
+                # Обновляем кэш в БД
+                await update_item_sync(item.id, telegram_id, views=views, contacts=contacts)
+                
+                if config.AVITO_API_MODE != "mock":
+                    data_source = "🟢 Актуально с Авито"
+            except AvitoAPIError as e:
+                logger.warning(f"Failed to fetch stats for report (Item: {item.id}): {e}")
+                if config.AVITO_API_MODE != "mock":
+                    data_source = "🟡 Кэш"
         
         lines.append(f"📦 <b>{item.title}</b> ({item.price} руб.)")
-        lines.append(f"👁 Просмотры: {views} | ❤️ В избранном: {favorites} | ✉️ Сообщения: {messages}")
+        lines.append(f"👁 Просмотры: {views} | 💬 Контакты: {contacts} <i>{data_source}</i>")
         
         # Эвристика: Рекомендации
-        if views < 15:
-            lines.append("💡 <i>Рекомендация:</i> Мало просмотров. Попробуйте обновить главное фото или снизить цену на 10%.")
-        elif favorites > 5 and messages == 0:
-            lines.append("💡 <i>Рекомендация:</i> Вещь часто добавляют в избранное, но не пишут. Возможно, цена чуть завышена, скиньте 5-10% — и ее заберут!")
-        elif messages > 0:
-            lines.append("💡 <i>Рекомендация:</i> Идут диалоги! Будьте на связи. Если никто не забрал, можно предложить скидку в личных сообщениях.")
+        created_at = item.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        
+        days_active = (now - created_at).days
+        
+        if days_active < FRESH_ITEM_DAYS_THRESHOLD and views == 0:
+            lines.append("💡 <i>Рекомендация:</i> Объявление совсем свежее, статистика еще не собралась. Подождем пару дней.")
+        elif views == 0:
+            lines.append("💡 <i>Рекомендация:</i> Совсем нет просмотров. Возможно, выбрана непопулярная категория, стоит обновить основное фото или предложить вещь бесплатно.")
+        elif views > HIGH_VIEWS_THRESHOLD and contacts == 0:
+            lines.append("💡 <i>Рекомендация:</i> Просмотры есть, обращений нет. Попробуйте обновить фотографии или немного снизить цену.")
+        elif contacts > 0:
+            lines.append("💡 <i>Рекомендация:</i> 🔥 Идут запросы! Не забывайте отвечать на сообщения (или звонки).")
         else:
-            lines.append("💡 <i>Рекомендация:</i> Хорошая динамика, пока ничего не трогайте. Ожидаем продажу!")
+            lines.append("💡 <i>Рекомендация:</i> 📊 Средняя динамика, ждем своего покупателя.")
             
         lines.append("")
         
