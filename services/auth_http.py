@@ -38,7 +38,8 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
     username = tg_user_data.get("username")
     first_name = tg_user_data.get("first_name")
     last_name = tg_user_data.get("last_name")
-    
+
+    try:
         async with async_session() as session:
             user = await get_or_create_user_from_telegram(
                 session=session,
@@ -46,15 +47,15 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                is_admin=(telegram_id == config.TELEGRAM_ADMIN_ID)
+                is_admin=(telegram_id == config.TELEGRAM_ADMIN_ID and config.TELEGRAM_ADMIN_ID != 0)
             )
-            
+
             token = create_access_token(
                 user_id=user.id,
                 telegram_id=user.telegram_id,
                 role=user.role
             )
-            
+
             return web.json_response({
                 "token": token,
                 "user": {
