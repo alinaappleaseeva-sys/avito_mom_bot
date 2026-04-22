@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 from sqlalchemy.future import select
 from sqlalchemy import update, delete
@@ -49,7 +50,7 @@ async def get_or_create_user_from_telegram(
     if user:
         return user
     
-    role = "admin" if is_admin or telegram_id == config.TELEGRAM_ADMIN_ID else "user"
+    role = "admin" if is_admin or (telegram_id == config.TELEGRAM_ADMIN_ID and config.TELEGRAM_ADMIN_ID != 0) else "user"
     try:
         return await create_user(
             session,

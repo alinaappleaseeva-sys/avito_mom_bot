@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 import hmac
 import hashlib
 import json
@@ -72,7 +73,7 @@ def test_validate_telegram_init_data_invalid_hash():
 # ----------------------------
 # 2. Tests for get_or_create_user_from_telegram
 # ----------------------------
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:

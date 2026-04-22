@@ -2,7 +2,7 @@ from aiohttp import web
 import json
 from config import config
 from database.database import async_session
-from database.crud import get_or_create_user_from_telegram
+from database.crud import get_or_create_user_from_telegram, get_item_by_id
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from database.errors import DatabaseError
 import asyncio
@@ -47,7 +47,8 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
     username = tg_user_data.get("username")
     first_name = tg_user_data.get("first_name")
     last_name = tg_user_data.get("last_name")
-    
+
+    try:
         async with async_session() as session:
             user = await get_or_create_user_from_telegram(
                 session=session,
@@ -55,15 +56,15 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
-                is_admin=(telegram_id == config.TELEGRAM_ADMIN_ID)
+                is_admin=(telegram_id == config.TELEGRAM_ADMIN_ID and config.TELEGRAM_ADMIN_ID != 0)
             )
-            
+
             token = create_access_token(
                 user_id=user.id,
                 telegram_id=user.telegram_id,
                 role=user.role
             )
-            
+
             return web.json_response({
                 "token": token,
                 "user": {
@@ -84,6 +85,49 @@ async def auth_telegram_handler(request: web.Request) -> web.Response:
     except Exception as e:
         logger.exception(f"Unexpected error during user authorization step: {e}")
         return build_error_response("INTERNAL_SERVER_ERROR", "Internal Server Error", 500)
+
+async def get_item_handler(request: web.Request) -> web.Response:
+    """
+    Эндпоинт для получения предмета по ID.
+    Проверяет, что предмет принадлежит авторизованному пользователю.
+    Возвращает 403, если предмет принадлежит другому пользователю.
+    """
+    user_payload = request.get('user', {})
+    telegram_id = user_payload.get('telegram_id')
+    if not telegram_id:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    try:
+        item_id = int(request.match_info['item_id'])
+    except (ValueError, KeyError):
+        return web.json_response({"error": "Invalid item ID"}, status=400)
+
+    try:
+        async with async_session() as session:
+            item = await get_item_by_id(item_id=item_id, user_id=telegram_id)
+            if item is None:
+                # Предмет не найден ИЛИ принадлежит другому пользователю.
+                # Возвращаем 403, чтобы не раскрывать существование чужих предметов.
+                return web.json_response(
+                    {"error": "Forbidden", "details": "You do not have access to this item."},
+                    status=403
+                )
+
+            return web.json_response({
+                "item": {
+                    "id": item.id,
+                    "title": item.title,
+                    "category": item.category,
+                    "description": item.description,
+                    "price": item.price,
+                    "status": item.status,
+                    "avito_url": item.avito_url,
+                }
+            })
+    except Exception as e:
+        logger.exception(f"Error fetching item {item_id}: {e}")
+        return web.json_response({"error": "Internal Server Error"}, status=500)
+
 
 @web.middleware
 async def jwt_auth_middleware(request: web.Request, handler) -> web.Response:
@@ -121,4 +165,5 @@ def init_auth_app() -> web.Application:
     """
     app = web.Application(middlewares=[jwt_auth_middleware])
     app.router.add_post('/auth/telegram', auth_telegram_handler)
+    app.router.add_get('/api/items/{item_id}', get_item_handler)
     return app
