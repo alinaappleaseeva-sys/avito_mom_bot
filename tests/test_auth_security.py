@@ -29,7 +29,7 @@ from sqlalchemy import update, delete
 
 from utils.telegram_init_data import validate_telegram_init_data, InvalidInitDataError
 from utils.jwt_tokens import create_access_token, decode_access_token
-from services.auth_http import jwt_auth_middleware
+from services.auth_http import jwt_auth_middleware, get_item_handler
 from database.crud import (
     get_or_create_user_from_telegram,
     get_user_by_telegram_id,
@@ -632,3 +632,156 @@ class TestEdgeCases:
         from sqlalchemy.exc import IntegrityError
         with pytest.raises(IntegrityError):
             await create_user(db_session, telegram_id=1100, username="second")
+
+
+# ============================================================
+# ГРУППА 7: HTTP-интеграция /api/items/{item_id} — изоляция
+# ============================================================
+
+class TestHTTPItemIsolation:
+    """
+    Ключевой интеграционный тест: Alice с валидным JWT пытается
+    получить /api/items/{bob_item_id} через HTTP и получает 403.
+    Использует реальные jwt_auth_middleware + get_item_handler + in-memory БД.
+    """
+
+    @pytest_asyncio.fixture
+    async def items_app(self, monkeypatch):
+        """
+        aiohttp приложение с реальным middleware + get_item_handler,
+        подключённое к in-memory SQLite через patched async_session.
+        """
+        monkeypatch.setattr(config, "JWT_SECRET", "test_jwt_secret_32bytes_long!!!")
+        monkeypatch.setattr(config, "JWT_ALGORITHM", "HS256")
+        monkeypatch.setattr(config, "TELEGRAM_ADMIN_ID", MOCK_USERS["eve"]["telegram_id"])
+
+        # Создаём in-memory БД
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        test_session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+        # Патчим async_session в модулях crud и auth_http, чтобы они использовали тестовую БД
+        import database.crud as crud_module
+        import services.auth_http as auth_http_module
+        monkeypatch.setattr(crud_module, "async_session", test_session_maker)
+        monkeypatch.setattr(auth_http_module, "async_session", test_session_maker)
+
+        # Создаём пользователей и предметы
+        async with test_session_maker() as session:
+            for name, data in [("alice", MOCK_USERS["alice"]), ("bob", MOCK_USERS["bob"]), ("eve", MOCK_USERS["eve"])]:
+                await get_or_create_user_from_telegram(
+                    session,
+                    telegram_id=data["telegram_id"],
+                    username=data["username"],
+                    first_name=data["first_name"],
+                    last_name=data["last_name"],
+                    is_admin=(name == "eve"),
+                )
+
+            for name, tg_id in [("alice", MOCK_USERS["alice"]["telegram_id"]),
+                                 ("bob",   MOCK_USERS["bob"]["telegram_id"])]:
+                item = Item(
+                    user_id=tg_id,
+                    category="toys",
+                    title=f"{name}'s teddy bear",
+                    description=f"Item belonging to {name}",
+                    price=500,
+                    status="draft",
+                )
+                session.add(item)
+            await session.commit()
+
+            # Получаем ID-шники предметов
+            result = await session.execute(select(Item).where(Item.user_id == MOCK_USERS["alice"]["telegram_id"]))
+            alice_item = result.scalars().first()
+            result = await session.execute(select(Item).where(Item.user_id == MOCK_USERS["bob"]["telegram_id"]))
+            bob_item = result.scalars().first()
+
+        # Собираем aiohttp приложение
+        app = web.Application(middlewares=[jwt_auth_middleware])
+        app.router.add_post("/auth/telegram", lambda r: web.json_response({"ok": True}))
+        app.router.add_get("/api/items/{item_id}", get_item_handler)
+
+        return {
+            "app": app,
+            "alice_item_id": alice_item.id,
+            "bob_item_id": bob_item.id,
+            "engine": engine,
+        }
+
+    async def test_alice_cannot_access_bobs_item_via_http(self, items_app, aiohttp_client):
+        """
+        КЛЮЧЕВОЙ ТЕСТ: Alice с валидным JWT → GET /api/items/{bob_item_id} → 403.
+        Это полная end-to-end проверка изоляции через HTTP.
+        """
+        alice_token = create_access_token(
+            user_id=1, telegram_id=MOCK_USERS["alice"]["telegram_id"], role="user"
+        )
+
+        client = await aiohttp_client(items_app["app"])
+        resp = await client.get(
+            f"/api/items/{items_app['bob_item_id']}",
+            headers={"Authorization": f"Bearer {alice_token}"}
+        )
+
+        assert resp.status == 403, (
+            f"Alice должна получить 403 при доступе к предмету Bob, но получила {resp.status}"
+        )
+        data = await resp.json()
+        assert "Forbidden" in data["error"]
+        assert "access" in data["details"].lower()
+
+    async def test_alice_can_access_own_item_via_http(self, items_app, aiohttp_client):
+        """Alice с валидным JWT → GET /api/items/{alice_item_id} → 200."""
+        alice_token = create_access_token(
+            user_id=1, telegram_id=MOCK_USERS["alice"]["telegram_id"], role="user"
+        )
+
+        client = await aiohttp_client(items_app["app"])
+        resp = await client.get(
+            f"/api/items/{items_app['alice_item_id']}",
+            headers={"Authorization": f"Bearer {alice_token}"}
+        )
+
+        assert resp.status == 200, (
+            f"Alice должна получить 200 при доступе к своему предмету, но получила {resp.status}"
+        )
+        data = await resp.json()
+        assert data["item"]["title"] == "alice's teddy bear"
+        assert data["item"]["description"] == "Item belonging to alice"
+
+    async def test_bob_cannot_access_alices_item_via_http(self, items_app, aiohttp_client):
+        """Bob с валидным JWT → GET /api/items/{alice_item_id} → 403 (обратная проверка)."""
+        bob_token = create_access_token(
+            user_id=2, telegram_id=MOCK_USERS["bob"]["telegram_id"], role="user"
+        )
+
+        client = await aiohttp_client(items_app["app"])
+        resp = await client.get(
+            f"/api/items/{items_app['alice_item_id']}",
+            headers={"Authorization": f"Bearer {bob_token}"}
+        )
+
+        assert resp.status == 403
+
+    async def test_no_token_gets_401_on_items(self, items_app, aiohttp_client):
+        """Без JWT → GET /api/items/{id} → 401 (middleware блокирует)."""
+        client = await aiohttp_client(items_app["app"])
+        resp = await client.get(f"/api/items/{items_app['alice_item_id']}")
+        assert resp.status == 401
+
+    async def test_nonexistent_item_returns_403_not_404(self, items_app, aiohttp_client):
+        """Запрос несуществующего item → 403 (не раскрывает info о существовании)."""
+        alice_token = create_access_token(
+            user_id=1, telegram_id=MOCK_USERS["alice"]["telegram_id"], role="user"
+        )
+
+        client = await aiohttp_client(items_app["app"])
+        resp = await client.get(
+            "/api/items/99999",
+            headers={"Authorization": f"Bearer {alice_token}"}
+        )
+        assert resp.status == 403, "Несуществующий item должен вернуть 403, а не 404"
+
